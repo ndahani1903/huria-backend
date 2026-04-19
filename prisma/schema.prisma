@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Payment {
+  id             String   @id @default(uuid())
+  orderId        String   @unique
+  amount         Float
+  status         String
+  transactionRef String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  //optional relation payment -> order
+  order    Order  @relation(fields: [orderId], references: [orderId])
+}
+
+model Order {
+  id        String   @id @default(uuid())
+  orderId   String   @unique
+  amount    Float
+  status    String 
+  otp       String?
+  driverId  String? 
+  userId         String?  // ✅ ADD THIS - customer who placed order
+
+  pickupLat Float?
+  pickupLng Float?
+  pickupAddress String?
+
+  distance      Float?
+  deliveryFee   Float?
+  driverEarning Float?
+  platformFee   Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+ //relation from order -> driver (important)
+  driver   Driver? @relation(fields: [driverId], references: [id])
+  payment  Payment?
+  items OrderItem[]
+  user     User?   @relation(fields: [userId], references: [id])
+  escrow  Escrow? 
+
+  // 🔥 ADD THIS BLOCK
+  @@index([status])
+  @@index([driverId])
+ @@index([userId])
+}
+
+model Refund {
+  id        String   @id @default(uuid())
+  paymentId String
+  amount    Float
+  reason    String?
+  status    String
+  createdAt DateTime @default(now())
+}
+
+model Driver {
+  id        String   @id @default(uuid())
+  userId    String   @unique   // 🔥 ADD THIS
+  name      String
+  phone     String   @unique
+  status    String   // available | busy | offline
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  wallet    Wallet?  // 👈 add this
+  withdrawals  Withdrawal[]   // 👈 add this  
+  orders     Order[]
+
+
+   @@index([status])
+}
+
+model Dispute {
+  id        String   @id @default(uuid())
+  orderId   String
+  reason    String
+  status    String   // open | resolved | rejected
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  phone    String @unique
+  email     String   @unique
+  password  String
+  role      String   // customer | driver | admin | merchant
+  createdAt DateTime @default(now())
+
+  driver   Driver?   // one-to-one with driver(relation from user->drver)
+  merchant Merchant? // one-to-one with merchant
+  orders   Order[]
+  pushTokens PushToken[]
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  driverId  String   @unique
+  balance   Float    @default(0)
+  createdAt DateTime @default(now())
+  
+
+  driver    Driver   @relation(fields: [driverId], references: [id])
+  transactions Transaction[] // 👈 add this
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  walletId  String
+  amount    Float
+  type      String   // credit | debit
+  createdAt DateTime @default(now())
+
+  wallet    Wallet   @relation(fields: [walletId], references: [id])
+}
+
+model Withdrawal {
+  id        String   @id @default(uuid())
+  driverId  String
+  amount    Float
+  status    String   // pending | approved | rejected
+  createdAt DateTime @default(now())
+
+  driver    Driver   @relation(fields: [driverId], references: [id])
+}
+
+model Merchant {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  name      String
+  phone     String
+  createdAt DateTime @default(now())
+
+ wallet     MerchantWallet?
+ escrowMerchants EscrowMerchant[] // ✅ ADD THIS - opposite relation
+  user     User      @relation(fields: [userId], references: [id])
+  products  Product[]
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  price       Float
+  stock       Int      @default(0)      // ✅ STOCK FIELD
+  description String?                    // ✅ DESCRIPTION FIELD
+  image       String?
+  merchantId  String
+  createdAt   DateTime @default(now())
+
+  merchant    Merchant @relation(fields: [merchantId], references: [id])
+ orderItems  OrderItem[]                // ✅ RELATION TO ORDERITEMS
+}
+
+model OrderItem {
+  id        String @id @default(uuid())
+  orderId   String
+  productId String
+  merchantId String
+  quantity  Int
+  price     Float
+
+  order     Order   @relation(fields: [orderId], references: [id])
+ product   Product @relation(fields: [productId], references: [id])
+}
+
+model Escrow {
+  id         String   @id @default(uuid())
+  orderId    String   @unique
+  amount     Float
+  status     String   // held | released | refunded | disputed
+  customerId String
+  driverId   String?
+  createdAt  DateTime @default(now())
+  releasedAt DateTime?
+  
+  order      Order    @relation(fields: [orderId], references: [orderId])
+ escrowMerchants EscrowMerchant[] // ✅ ADD THIS - opposite relation
+}
+
+model EscrowMerchant {
+  id         String   @id @default(uuid())
+  escrowId   String
+  merchantId String
+  amount     Float
+  status     String   // pending | released | refunded
+  orderId    String
+  createdAt  DateTime @default(now())
+  releasedAt DateTime?
+
+  escrow     Escrow   @relation(fields: [escrowId], references: [id])
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+
+  @@unique([escrowId, merchantId])
+}
+
+model MerchantWallet {
+  id             String   @id @default(uuid())
+  merchantId     String   @unique
+  balance        Float    @default(0)
+  pendingBalance Float    @default(0)  // Money in escrow waiting4release
+  totalEarned    Float    @default(0)  // Lifetime earnings
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+ withdrawals   MerchantWithdrawal[]
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  transactions MerchantTransaction[]
+}
+
+model MerchantTransaction {
+  id         String   @id @default(uuid())
+  walletId   String
+  amount     Float
+  type       String   // credit | debit
+  orderId    String   // Reference to order
+  status     String   // pending | completed | failed
+  description String?
+  createdAt  DateTime @default(now())
+
+  wallet     MerchantWallet @relation(fields: [walletId], references: [id])
+}
+
+model MerchantWithdrawal {
+  id         String   @id @default(uuid())
+  walletId   String
+  amount     Float
+  phone      String   // Merchant phone number for payment
+  status     String   // pending | processing | completed | failed
+  reference  String?  // Transaction reference from payment provider
+  createdAt  DateTime @default(now())
+  processedAt DateTime?
+
+  wallet     MerchantWallet @relation(fields: [walletId], references: [id])
+}
+
+model PushToken {
+  id         String   @id @default(uuid())
+  userId     String
+  token      String   @unique
+  deviceType String   // ios | android | web
+  active     Boolean  @default(true)
+  lastUsed   DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id])
+}
