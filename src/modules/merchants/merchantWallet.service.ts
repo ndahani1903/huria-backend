@@ -59,7 +59,7 @@ console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balanc
         merchant.user.phone,
       `💰 ${amount} TZS has been added to your wallet`
       );
- await SMSService.send(merchant.user.phone, amount, `💰 ${amount} TZS added to your wallet from order completion. Total balance: ${wallet.balance} TZS`);
+ await SMSService.send(merchant.user.phone, `💰 ${amount} TZS added to your wallet from order completion. Total balance: ${wallet.balance} TZS`);
     }
      
 

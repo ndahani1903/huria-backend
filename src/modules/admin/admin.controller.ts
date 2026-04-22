@@ -112,7 +112,7 @@ export class AdminController {
       const { status, resolution } = req.body;
       
       const dispute = await prisma.dispute.update({
-        where: { id },
+        where: { id: id as string},
         data: {
           status,
           resolution,
@@ -155,7 +155,7 @@ export class AdminController {
       const { status } = req.body;
       
       const withdrawal = await prisma.withdrawal.update({
-        where: { id },
+        where: { id: id as string},
         data: { status }
       });
       

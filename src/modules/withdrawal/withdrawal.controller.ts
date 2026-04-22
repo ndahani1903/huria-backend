@@ -6,6 +6,10 @@ import { prisma } from "../../config/db";
 export class WithdrawalController {
   static async request(req: AuthRequest, res: Response) {
     try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       const userId = req.user.id;
       const { amount } = req.body;
 
@@ -19,7 +23,6 @@ export class WithdrawalController {
       }
 
       const withdrawal = await WithdrawalService.request(driver.id, amount);
-
       res.json(withdrawal);
     } catch (e: any) {
        console.error("Withdrawal request error:", e);

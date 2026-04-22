@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { MpesaService } from './mpesa.service';
 import { PaymentService } from './payment.service';
 import { WebhookService } from './webhook.service';
+import { prisma } from '../../config/db';  // ✅ Add this import
 
 export class PaymentController {
   static async stkPush(req: Request, res: Response) {
@@ -31,7 +32,7 @@ export class PaymentController {
       }
 
       // ✅ Pass phone number as well if needed
-     const payment = await PaymentService.initiatePayment(orderId, paymentAmount);
+     const payment = await PaymentService.initiatePayment(orderId, phone || '', paymentAmount);
 
       res.json(payment);
 
@@ -85,7 +86,7 @@ export class PaymentController {
   try {
     const { orderId } = req.params;
 
-    const payment = await PaymentService.get(orderId);
+    const payment = await PaymentService.get(orderId as string);
 
     if (!payment) {
       return res.status(404).json({ error: 'Payment not found' });

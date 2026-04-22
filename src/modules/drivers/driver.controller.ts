@@ -1,10 +1,12 @@
 import { Response } from 'express';
 import { AuthRequest } from "../../middleware/auth.middleware";
 import { DriverService } from './driver.service';
-import { prisma, redis } from "../../config/db";
+import { prisma } from "../../config/db";
+import { redis } from "../../config/redis";
 
 export class DriverController {
-  static async create(req: AuthRequest, res: Response) {
+/* //we ommit cause it is not used
+static async create(req: AuthRequest, res: Response) {
     try {
       const { name, phone } = req.body;
 
@@ -14,7 +16,7 @@ export class DriverController {
     } catch (error) {
       res.status(500).json({ error: 'Driver creation failed' });
     }
-  }
+  } */
 
 
  static async goOnline(req: AuthRequest, res: Response) {
@@ -95,8 +97,9 @@ export class DriverController {
         return res.status(404).json({ error: 'Driver profile not found' });
       }
 
-     const status = await DriverService.getStatus(driver.id);
-      res.json(status);
+  // ✅ Fixed: Use getById instead of getStatus
+    const driverData = await DriverService.getById(driver.id);
+   res.json({ driver: driverData, isOnline: driverData?.status === 'available' });
     } catch (error: any) {
       console.error('Get status error:', error);
       res.status(500).json({ error: error.message });

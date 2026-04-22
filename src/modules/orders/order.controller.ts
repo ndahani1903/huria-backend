@@ -1,8 +1,9 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { OrderService } from './order.service';
+import { AuthRequest } from '../../middleware/auth.middleware';
 
 export class OrderController {
-  static async create(req: Request, res: Response) {
+  static async create(req: AuthRequest, res: Response) {
     try {
       const { orderId, amount, pickupLat, pickupLng } = req.body;
 
@@ -17,13 +18,13 @@ export class OrderController {
    }
   }
 
-  static async checkout(req: any, res: any) {
+  static async checkout(req: AuthRequest, res: any) {
   try {
     const { items, pickupLat, pickupLng } = req.body;
 
    // ✅ CHECK IF USER EXISTS
       if (!req.user) {
-        console.error("❌ No user found in request!");
+        console.error("❌ No user found in AuthRequest!");
         return res.status(401).json({ error: "User not authenticated" });
       }
 
@@ -48,7 +49,7 @@ export class OrderController {
   }
 }
 
-  static async deliver(req: Request, res: Response) {
+  static async deliver(req: AuthRequest, res: Response) {
     try {
       const { orderId } = req.body;
 
@@ -60,7 +61,7 @@ export class OrderController {
     }
   }
 
-  static async complete(req: Request, res: Response) {
+  static async complete(req: AuthRequest, res: Response) {
     try {
       const { orderId, otp } = req.body;
 
@@ -72,11 +73,11 @@ export class OrderController {
     }
   }
 
-  static async get(req: Request, res: Response) {
-    try {
-      const { orderId } = req.params;
+  static async get(req: AuthRequest, res: Response) {
+try {
+ const { orderId } = req.params;
 
-      const order = await OrderService.get(orderId);
+ const order = await OrderService.get(orderId as string);  // ✅ Cast to string
 
       res.json(order);
     } catch (error) {
@@ -84,7 +85,7 @@ export class OrderController {
     }
   }
 
-static async assignDriver(req: Request, res: Response) {
+static async assignDriver(req: AuthRequest, res: Response) {
   try {
     const { orderId } = req.body;
 
@@ -99,11 +100,11 @@ static async assignDriver(req: Request, res: Response) {
   }
 }
 
-static async tracking(req: Request, res: Response) {
+static async tracking(req: AuthRequest, res: Response) {
   try {
     const { orderId } = req.params;
 
-    const data = await OrderService.getTracking(orderId);
+    const data = await OrderService.getTracking(orderId as string);
 
     res.json(data);
   } catch (error) {

@@ -162,7 +162,7 @@ model Product {
   price       Float
   stock       Int      @default(0)      // ✅ STOCK FIELD
   description String?                    // ✅ DESCRIPTION FIELD
- isActive    Boolean   @default(true)  // ✅ Add field for soft delete
+  isActive    Boolean   @default(true)  // ✅ Add field for soft delete
   image       String?
   merchantId  String
   createdAt   DateTime @default(now())

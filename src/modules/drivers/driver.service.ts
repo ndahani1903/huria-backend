@@ -24,15 +24,6 @@ export class DriverService {
     });
   }      
 */
-  static async updateLocation(driverId: string, lat: number, lng: number) {
-    await redis.set(
-      `driver:${driverId}:location`,
-      JSON.stringify({ lat, lng, timestamp: Date.now() }),
-      "EX",
-      60
-    );
-    console.log(`📍 Driver ${driverId} location updated to ${lat}, ${lng}`);
-  }
 
 static async acceptOrder(orderId: string, driverId: string) {
     const order = await prisma.order.findUnique({
@@ -147,13 +138,13 @@ static async initDriverAvailability(driverId: string) {
   static async heartbeat(driverId: string, lat: number, lng: number) {
     // Update location with extended expiry
     const key = `driver:${driverId}:location`;
-    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), "EX", 60);
+    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), { EX: 60 });
     
     // Ensure they're in available set
     await redis.sAdd("drivers:available", driverId);
     
     // Update last seen timestamp
-    await redis.set(`driver:${driverId}:lastSeen`, Date.now().toString(), "EX", 70);
+    await redis.set(`driver:${driverId}:lastSeen`, Date.now().toString(), { EX: 70 });
     
     return { success: true };
   }
@@ -167,14 +158,14 @@ static async initDriverAvailability(driverId: string) {
       
       const now = Date.now();
       const staleThreshold = 5 * 60 * 1000; // 5 minutes
-      const staleDrivers = [];
+       const staleDrivers: string[] = [];
       
       for (const driver of allDrivers) {
         const lastSeen = await redis.get(`driver:${driver.id}:lastSeen`);
         
-        if (lastSeen) {
-          const lastSeenTime = parseInt(lastSeen);
-          const isStale = (now - lastSeenTime) > staleThreshold;
+     if (lastSeen) {
+       const lastSeenTime = parseInt(lastSeen as string);  // ✅ Cast to string
+       const isStale = (now - lastSeenTime) > staleThreshold;
           
           if (isStale && driver.status === 'available') {
             // Driver hasn't sent heartbeat in 5 minutes
@@ -239,15 +230,17 @@ static async initDriverAvailability(driverId: string) {
     return { message: "Order completed" };
   }
 
- // ✅ UPDATE LOCATION (with heartbeat)
-static async updateLocation(driverId: string, lat: number, lng: number) {
-  const key = `driver:${driverId}:location`;
-
-   await redis.set(key, JSON.stringify({ lat, lng, timestamp: Date.now() }), "EX", 10);
+  // ✅ UPDATE LOCATION (with heartbeat)
+  static async updateLocation(driverId: string, lat: number, lng: number) {
+    const key = `driver:${driverId}:location`;
+    await redis.set(key, JSON.stringify({ lat, lng, timestamp: Date.now() }),
+     { EX: 60 }  // ✅ Fixed: Use object syntax instead of 4 arguments
+    );
+    console.log(`📍 Driver ${driverId} location updated`);
 
  // Also update heartbeat
     await this.heartbeat(driverId, lat, lng);
-
+ 
   // Broadcast to customers + admin dashboards
   io.emit("driver_location_update", {
     driverId,

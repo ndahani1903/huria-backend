@@ -116,8 +116,7 @@ socket.on("driver:location", async (data) => {
     await redis.set(
       `driver:${driverId}:location`,
       JSON.stringify({ lat, lng, timestamp: now }),
-      "EX",
-      60 // 🔥 expires in 60 sec
+      { EX: 60 } // 🔥 expires in 60 sec (Use object syntax)
     );
 
    // optional: broadcast for tracking
@@ -144,7 +143,15 @@ setInterval(async () => {
 
 // 💓 HEARTBEAT MONITOR (optional - log stale drivers)
 setInterval(async () => {
-  const drivers = await redis.sMembers("drivers:available");
+  const driversRaw = await redis.sMembers("drivers:available");
+  let drivers: string[];
+  if (driversRaw instanceof Set) {
+    drivers = Array.from(driversRaw).map(id => id.toString());
+  } else if (Array.isArray(driversRaw)) {
+    drivers = driversRaw.map(id => id.toString());
+  } else {
+    drivers = [];
+  }
   if (drivers.length > 0) {
     console.log(`💓 Active drivers: ${drivers.length}`);
   }
@@ -152,8 +159,8 @@ setInterval(async () => {
 
 // At the bottom of server.ts, modify the listen:
 
-const PORT = env.PORT || 5000;  // Railway provides PORT env variable
+const PORT = parseInt(env.PORT as string) || 5000;
 
-httpServer.listen(env.PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

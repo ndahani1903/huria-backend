@@ -15,6 +15,7 @@ export class ProductService {
         stock: stock || 0,
         image,
         description,
+        isActive: true,  // ✅ Added
         merchantId: merchant.id,
       },
     });
@@ -25,14 +26,13 @@ export class ProductService {
     include: {
       merchant: true, // 🔥 include merchant
     },
- // ✅ COMMENT OUT the stock filter for now
-   //  where: {
-     //  stock: { gt: 0 } // Only show products in stock
-     // }  
+    where: {
+     isActive: true,  // ✅ Only show active products 
+    }  
   });
  }
 
-  static async updateStock(productId: number, quantity: number) {
+  static async updateStock(productId: string, quantity: number) {
     return prisma.product.update({
       where: { id: productId },
       data: {

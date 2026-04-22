@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { prisma } from '../config/db';
 
 const SECRET = process.env.JWT_SECRET as string;
 
@@ -8,7 +9,6 @@ export interface AuthRequest extends Request {
   user?: {
     id: string;
     role: string;
-   driverId?: string | null;
   };
 }
 
@@ -16,14 +16,14 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
   try {
     const authHeader = req.headers.authorization;
 
-    console.log("🔐 Auth header:", header); // ✅ DEBUG
+    console.log("🔐 Auth header:", authHeader); // ✅ DEBUG
 
     if (!authHeader) {
       console.log("❌ No token provided");
       return res.status(401).json({ error: "No token provided" });
     }
 
-    const token = AuthHeader.split(" ")[1];
+    const token = authHeader.split(" ")[1];
     console.log("🔐 Token:", token.substring(0, 20) + "..."); // ✅ DEBUG
 
     if (!token) {
@@ -40,7 +40,6 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
     req.user = {
       id: decoded.id,
       role: decoded.role,
-     driverId: decoded.driverId,
     };
 
     console.log("✅ User attached to request:", req.user); // ✅ DEBUG

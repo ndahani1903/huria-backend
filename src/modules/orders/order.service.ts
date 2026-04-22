@@ -400,7 +400,17 @@ const drivers = await prisma.driver.findMany();
 */
 
  // Get available drivers from Redis
-const driverIds = await redis.sMembers("drivers:available");
+// To this (convert Buffer to string):
+const driverIdsRaw = await redis.sMembers("drivers:available");
+  // ✅ Convert Set to array if needed, and ensure strings
+let driverIds: string[];
+if (driverIdsRaw instanceof Set) {
+  driverIds = Array.from(driverIdsRaw).map(id => id.toString());
+} else if (Array.isArray(driverIdsRaw)) {
+  driverIds = driverIdsRaw.map(id => id.toString());
+} else {
+  driverIds = [];
+} 
 console.log("🔍 Available drivers in Redis:", driverIds);
 
 const drivers = await prisma.driver.findMany({
@@ -421,24 +431,23 @@ const drivers = await prisma.driver.findMany({
 
   for (const driver of drivers) {
     const key = `driver:${driver.id}:location`;
+    let location = null;
     const locationRaw = await redis.get(key);
-
     console.log("Checking:", key, locationRaw);
 
-    if (!locationRaw) {
-      console.log(`Driver ${driver.id} has no location data`);
-      continue; // Skip drivers without location
-     }
-
-   let location;
-
-   try {
-     location = JSON.parse(locationRaw);
-   } catch {
-       console.log("Invalid location JSON:", locationRaw);
-       continue;
-    }
-
+    if (locationRaw) {
+       try {
+         const locationStr = locationRaw.toString();
+         location = JSON.parse(locationStr);  // ✅ Convert to string first
+        } catch {
+         console.log("Invalid location JSON:", locationRaw);
+         continue;
+        }
+      } else {
+        console.log(`Driver ${driver.id} has no location data`);
+        continue;  // Skip drivers without location
+      }
+    
     const distance = calculateDistance(
       order.pickupLat,
       order.pickupLng,
@@ -541,7 +550,7 @@ static async getTracking(orderId: string) {
   return {
     orderId,
     driverId: order.driverId,
-    location: location ? JSON.parse(location) : null
+   location: location ? JSON.parse(location.toString()) : null
   };
  }
 }

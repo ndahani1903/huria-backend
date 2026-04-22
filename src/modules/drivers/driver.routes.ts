@@ -5,7 +5,6 @@ import { requireRole } from "../../middleware/role.middleware";
 
 const router = Router();
 
-router.post('/', DriverController.create);
 router.post("/location", DriverController.updateLocation);
 router.post('/heartbeat', authMiddleware, DriverController.heartbeat);
 router.post('/online', authMiddleware, DriverController.goOnline);

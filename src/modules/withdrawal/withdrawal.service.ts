@@ -6,7 +6,7 @@ export class WithdrawalService {
     // ✅ FIX: Get wallet with correct driverId relation
     const driver = await prisma.driver.findUnique({
       where: { id: driverId },
-      include: { wallet: true }
+      include: { user: true, wallet: true } //for two we separate by comma
     });
 
     if (!driver) {

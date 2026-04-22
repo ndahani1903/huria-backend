@@ -4,7 +4,7 @@ import { MerchantWalletService } from './merchantWallet.service';
 import { prisma } from '../../config/db';
 
 export class MerchantWalletController {
-   static async getWallet(req: AuthRequest, res: Response) {
+  /* static async getWallet(req: AuthRequest, res: Response) {
     try {
       const merchant = await prisma.merchant.findUnique({
         where: { userId: req.user.id }
@@ -21,10 +21,14 @@ export class MerchantWalletController {
       res.status(500).json({ error: error.message });
     }
   }
-
+*/
   // Get wallet balance
   static async getBalance(req: AuthRequest, res: Response) {
     try {
+       if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       const merchant = await prisma.merchant.findUnique({
         where: { userId: req.user.id }
       });
@@ -43,6 +47,10 @@ export class MerchantWalletController {
   // Request withdrawal
   static async requestWithdrawal(req: AuthRequest, res: Response) {
     try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
       const { amount, phone } = req.body;
       
       const merchant = await prisma.merchant.findUnique({
@@ -61,7 +69,7 @@ export class MerchantWalletController {
       );
       
       res.json(withdrawal);
-    } catch (error) {
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   }
@@ -69,6 +77,10 @@ export class MerchantWalletController {
   // Get transaction history
   static async getTransactions(req: AuthRequest, res: Response) {
     try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
       const merchant = await prisma.merchant.findUnique({
         where: { userId: req.user.id }
       });
@@ -79,7 +91,7 @@ export class MerchantWalletController {
       
       const transactions = await MerchantWalletService.getTransactionHistory(merchant.id);
       res.json(transactions);
-    } catch (error) {
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   }

@@ -6,7 +6,8 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
 
 let client: twilio.Twilio | null = null;
- 
+
+ //i dont have twillio yet
 {/*if (accountSid && authToken) {
   client = twilio(accountSid, authToken);
   console.log("✅ Twilio SMS service initialized");
