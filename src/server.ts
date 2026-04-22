@@ -40,16 +40,22 @@ export const io = new Server(httpServer, {
   }
 });
 
-const pubClient = createClient({ url: "redis://localhost:6379" });
+const redisUrl = process.env.redis://default:ytTLWKXYcpRTskkxmMrWyfxwaQOUfwUL@redis.railway.internal:6379 || "redis://localhost:6379";
+
+const pubClient = createClient({ url: redisUrl });
 const subClient = pubClient.duplicate();
 
 async function initSocketRedis() {
-  await pubClient.connect();
-  await subClient.connect();
-
- io.adapter(createAdapter(pubClient, subClient));
-
-console.log("✅ Socket.IO Redis adapter connected");
+  try {
+    await pubClient.connect();
+    await subClient.connect();
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log("✅ Socket.IO Redis adapter connected");
+  } catch (error) {
+    console.error("❌ Redis connection failed:", error);
+    // Don't crash the app - continue without Redis adapter
+    console.log("⚠️ Running without Redis adapter (Socket.IO will use memory adapter)");
+  }
 }
 
 initSocketRedis();
