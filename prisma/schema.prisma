@@ -47,6 +47,7 @@ model Order {
   items OrderItem[]
   user     User?   @relation(fields: [userId], references: [id])
   escrow  Escrow? 
+disputes    Dispute[] // ✅ Add this relation
 
   // 🔥 ADD THIS BLOCK
   @@index([status])
@@ -84,8 +85,15 @@ model Dispute {
   id        String   @id @default(uuid())
   orderId   String
   reason    String
-  status    String   // open | resolved | rejected
+  status    String    @default("open") // open | resolved | rejected
+  resolution  String?
+  resolvedById String?
+  resolvedAt  DateTime?
   createdAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+order   Order @relation(fields: [orderId], references: [orderId])//Link to order
+resolvedBy  User?  @relation(fields: [resolvedById], references: [id])
 }
 
 model User {
@@ -101,6 +109,7 @@ model User {
   merchant Merchant? // one-to-one with merchant
   orders   Order[]
   pushTokens PushToken[]
+  disputes    Dispute[] 
 }
 
 model Wallet {
@@ -153,6 +162,7 @@ model Product {
   price       Float
   stock       Int      @default(0)      // ✅ STOCK FIELD
   description String?                    // ✅ DESCRIPTION FIELD
+ isActive    Boolean   @default(true)  // ✅ Add field for soft delete
   image       String?
   merchantId  String
   createdAt   DateTime @default(now())

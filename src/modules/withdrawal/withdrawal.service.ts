@@ -3,17 +3,31 @@ import { SMSService } from '../../services/sms.service';
 
 export class WithdrawalService {
   static async request(driverId: string, amount: number) {
-    const wallet = await prisma.wallet.findUnique({
-      where: { driverId },
+    // ✅ FIX: Get wallet with correct driverId relation
+    const driver = await prisma.driver.findUnique({
+      where: { id: driverId },
+      include: { wallet: true }
     });
 
-    if (!wallet || wallet.balance < amount) {
-      throw new Error("Insufficient balance");
+    if (!driver) {
+      throw new Error("Driver not found");
     }
 
-    // Deduct balance
+    const wallet = driver.wallet;
+
+    if (!wallet) {
+      throw new Error("Wallet not found");
+    }
+
+    console.log(`💰 Withdrawal check: Balance=${wallet.balance}, Requested=${amount}`);
+
+    if (wallet.balance < amount) {
+      throw new Error(`Insufficient balance. Available: ${wallet.balance} TZS`);
+    }
+    
+     // Deduct balance
     await prisma.wallet.update({
-      where: { driverId },
+      where: { id: wallet.id }, // ✅ Use wallet.id instead of driverId
       data: {
         balance: wallet.balance - amount,
       },
@@ -28,11 +42,6 @@ export class WithdrawalService {
     });
 
  // ✅ SMS: Notify driver about withdrawal request
-    const driver = await prisma.driver.findUnique({
-      where: { id: driverId },
-      include: { user: true }
-    });
-    
     if (driver?.user?.phone) {
       await SMSService.send(driver.user.phone, `💰 Withdrawal request of TZS ${amount} submitted. We'll process within 24 hours.`);
     }
@@ -40,8 +49,14 @@ export class WithdrawalService {
     return withdrawal;
   }
 
-  static async getAll() {
-    return prisma.withdrawal.findMany();
+   static async getAll() {
+    return prisma.withdrawal.findMany({
+      include: {
+        driver: {
+          include: { user: true }
+        }
+      }
+    });
   }
 
 // ✅ NEW METHOD: Process withdrawal (admin)

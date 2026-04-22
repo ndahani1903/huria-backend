@@ -23,7 +23,7 @@ export class DisputeController {
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: 'Resolve failed' });
-    }
+    } 
   }
 
   static async reject(req: Request, res: Response) {

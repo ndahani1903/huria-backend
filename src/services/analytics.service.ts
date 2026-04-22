@@ -6,11 +6,17 @@ export class AnalyticsService {
   static async getDailyStats(date: Date) {
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
+
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
     
     const orders = await prisma.order.findMany({
-      where: { createdAt: { gte: start, lte: end } },
+      where: { 
+        createdAt: { 
+           gte: start, 
+           lte: end 
+          } 
+        }
     });
     
     const completedOrders = orders.filter(o => o.status === 'completed');
@@ -21,12 +27,12 @@ export class AnalyticsService {
       totalOrders: orders.length,
       completedOrders: completedOrders.length,
       totalRevenue,
-      averageOrderValue: completedOrders.length ? totalRevenue / completedOrders.length : 0,
+      averageOrderValue: completedOrders.length ? totalRevenue / completedOrders.length : 0
     };
   }
   
-  // Weekly report
-  static async getWeeklyReport() {
+  // Weekly report, alternative
+ /* static async getWeeklyReport() {
     const last7Days = Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - i);
@@ -42,6 +48,48 @@ export class AnalyticsService {
       daily: dailyStats.reverse(),
       total: dailyStats.reduce((sum, d) => sum + d.totalOrders, 0),
       revenue: dailyStats.reduce((sum, d) => sum + d.totalRevenue, 0),
+    };
+  }*/
+
+   static async getWeeklyReport() {
+    const today = new Date();
+    const weekAgo = new Date();
+    weekAgo.setDate(today.getDate() - 7);
+
+    const orders = await prisma.order.findMany({
+      where: {
+        createdAt: {
+          gte: weekAgo
+        }
+      }
+    });
+
+    const dailyStats = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(weekAgo);
+      date.setDate(weekAgo.getDate() + i);
+      const stats = await this.getDailyStats(date);
+      dailyStats.push(stats);
+    }
+
+    const totalOrders = orders.length;
+    const completedOrders = orders.filter(o => o.status === "completed").length;
+    const totalRevenue = orders
+      .filter(o => o.status === "completed")
+      .reduce((sum, o) => sum + o.amount, 0);
+
+    return {
+      period: {
+        start: weekAgo,
+        end: today
+      },
+      summary: {
+        totalOrders,
+        completedOrders,
+        totalRevenue,
+        completionRate: totalOrders > 0 ? (completedOrders / totalOrders) * 100 : 0
+      },
+      daily: dailyStats
     };
   }
   
@@ -69,27 +117,36 @@ export class AnalyticsService {
   
   // Top products
   static async getTopProducts(limit = 10) {
-    const orderItems = await prisma.orderItem.groupBy({
+    const topProducts = await prisma.orderItem.groupBy({
       by: ['productId'],
-      _sum: { quantity: true },
-      orderBy: { _sum: { quantity: 'desc' } },
+      _sum: { 
+         quantity: true
+       },
+      orderBy: { 
+        _sum: { 
+         quantity: 'desc' 
+       } 
+     },
       take: limit,
     });
     
-    const products = await Promise.all(
-      orderItems.map(async (item) => {
+    const productsWithDetails = await Promise.all(
+      topProducts.map(async (item) => {
         const product = await prisma.product.findUnique({
           where: { id: item.productId },
+          include: { merchant: { include: { user: { select: { name: true } } } } }
         });
+        
         return {
           productId: item.productId,
-          name: product?.name,
-          totalSold: item._sum.quantity,
+          name: product?.name || "Unknown",
+          merchantName: product?.merchant?.user?.name || "Unknown",
+          totalSold: item._sum.quantity || 0
         };
       })
     );
     
-    return products;
+    return productsWithDetails;
   }
   
   // Customer lifetime value

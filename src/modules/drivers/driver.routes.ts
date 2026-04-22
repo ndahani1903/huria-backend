@@ -7,10 +7,10 @@ const router = Router();
 
 router.post('/', DriverController.create);
 router.post("/location", DriverController.updateLocation);
-router.post('/online', authMiddleware, requireRole("driver"), DriverController.goOnline);
-router.post('/offline', authMiddleware, requireRole("driver"), DriverController.goOffline);
-router.post('/heartbeat', authMiddleware, requireRole("driver"), DriverController.heartbeat);
-router.get('/status', authMiddleware, requireRole("driver"), DriverController.getStatus);
+router.post('/heartbeat', authMiddleware, DriverController.heartbeat);
+router.post('/online', authMiddleware, DriverController.goOnline);
+router.post('/offline', authMiddleware, DriverController.goOffline);
+router.get('/status', authMiddleware, DriverController.getStatus);
 
 // Cleanup endpoint (admin only)
 router.post('/cleanup-stale', authMiddleware, requireRole("admin"), DriverController.cleanupStale);

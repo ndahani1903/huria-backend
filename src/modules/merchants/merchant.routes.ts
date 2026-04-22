@@ -4,7 +4,7 @@ import { authMiddleware } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/role.middleware";
 
 const router = Router();
-
+ 
 // Product management
 router.get("/products", authMiddleware, requireRole("merchant"), MerchantController.getMyProducts);
 router.post("/products", authMiddleware, requireRole("merchant"), MerchantController.addProduct);

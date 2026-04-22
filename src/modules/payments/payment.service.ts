@@ -5,6 +5,16 @@ import { SMSService } from '../../services/sms.service';
 
 export class PaymentService {
   static async initiatePayment(orderId: string, phone: string, amount: number) {
+     // ✅ FIX: Fetch order first to get user info
+     const order = await prisma.order.findUnique({
+       where: { orderId },
+       include: { user: true }
+     });
+
+     if (!order) {
+       throw new Error('Order not found');
+     }
+
      const existing = await prisma.payment.findUnique({
        where: { orderId },
       });
@@ -16,16 +26,17 @@ export class PaymentService {
     const payment = await prisma.payment.create({
       data: {
         orderId,
-        amount: 5000,
+        amount: amount,
         status: 'pending',
       },
-    });
-
+    });  
+ 
 // ✅ SMS: Send payment initiation notification
     if (order?.user?.phone) {
-      await SMSService.sendPaymentReceived(order.user.phone, orderId, amount);
-    }
+     await SMSService.sendPaymentReceived(order.user.phone, orderId, amount);
+    } 
 
+ 
   // ✅ MARK ORDER AS PAID
   await OrderService.markPaid(orderId);
 

@@ -6,14 +6,14 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
 
 let client: twilio.Twilio | null = null;
-
-if (accountSid && authToken) {
+ 
+{/*if (accountSid && authToken) {
   client = twilio(accountSid, authToken);
   console.log("✅ Twilio SMS service initialized");
 } else {
   console.log("⚠️ Twilio not configured - SMS will use console.log fallback");
-}
-
+} */}
+ 
 export class SMSService {
   
   static async send(phone: string, message: string): Promise<boolean> {

@@ -24,7 +24,16 @@ export class DriverService {
     });
   }      
 */
-  
+  static async updateLocation(driverId: string, lat: number, lng: number) {
+    await redis.set(
+      `driver:${driverId}:location`,
+      JSON.stringify({ lat, lng, timestamp: Date.now() }),
+      "EX",
+      60
+    );
+    console.log(`📍 Driver ${driverId} location updated to ${lat}, ${lng}`);
+  }
+
 static async acceptOrder(orderId: string, driverId: string) {
     const order = await prisma.order.findUnique({
       where: { orderId },
@@ -69,21 +78,29 @@ static async initDriverAvailability(driverId: string) {
 
    // ✅ MARK DRIVER AVAILABLE
   static async markAvailable(driverId: string) {
+  try {
+     // 🔥Add back to Redis available set
+  await redis.sAdd("drivers:available", driverId);
+
      // Update database
     await prisma.driver.update({
       where: { id: driverId },
       data: { status: "available" },
     });
-  
-    // free driver
-    if (order.driverId) {
-      await prisma.driver.update({
-        where: { id: order.driverId },
-        data: { status: "available" },
-      });
+  console.log(`🚚 Driver ${driverId} marked as AVAILABLE`);
+    } catch (error) {
+      console.error(`Error marking driver ${driverId} as available:`, error);
+      
     }
-    // 🔥 ADD THIS
-  await redis.sAdd("drivers:available", driverId);
+//to be ommited
+    // free driver
+    //if (order.driverId) {
+    //  await prisma.driver.update({
+      //  where: { id: order.driverId },
+       // data: { status: "available" },
+     // });
+    //}
+    
   console.log("✅ Driver available again:", driverId);
   
   return { success: true };
@@ -92,18 +109,19 @@ static async initDriverAvailability(driverId: string) {
 
     // ✅ GO OFFLINE (manual)
   static async goOffline(driverId: string) {
+      // Remove from Redis
+    await redis.sRem("drivers:available", driverId);
+
     // Update database
     await prisma.driver.update({
       where: { id: driverId },
       data: { status: "offline" },
+     //data: { isOnline: false, isAvailable: false }
     });
-    
-    // Remove from Redis
-    await redis.sRem("drivers:available", driverId);
-    
+     
     // Clear location
     await redis.del(`driver:${driverId}:location`);
-    
+    console.log(`🚚 Driver ${driverId} is now OFFLINE`);
     console.log("✅ Driver went offline:", driverId);
     
     return { success: true };
@@ -111,17 +129,17 @@ static async initDriverAvailability(driverId: string) {
   
   // ✅ GO ONLINE
   static async goOnline(driverId: string) {
+   // Add to Redis
+    await redis.sAdd("drivers:available", driverId);
+
     // Update database
     await prisma.driver.update({
       where: { id: driverId },
       data: { status: "available" },
     });
-    
-    // Add to Redis
-    await redis.sAdd("drivers:available", driverId);
-    
-    console.log("✅ Driver went online:", driverId);
-    
+   
+    //console.log("✅ Driver went online:", driverId);
+    console.log(`🚚 Driver ${driverId} is now ONLINE`);
     return { success: true };
   }
   

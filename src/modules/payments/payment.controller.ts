@@ -6,14 +6,37 @@ import { WebhookService } from './webhook.service';
 export class PaymentController {
   static async stkPush(req: Request, res: Response) {
     try {
-      const { orderId, amount } = req.body;
+      const { orderId, amount, phone } = req.body;
 
-      const payment = await PaymentService.initiatePayment(orderId, amount);
+     // ✅ Validate required fields
+      if (!orderId) {
+        return res.status(400).json({ error: 'Order ID is required' });
+      }
+      
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: 'Valid amount is required' });
+      }
+
+      // ✅ Get the order to get the correct amount if not provided
+      let paymentAmount = amount;
+      if (!paymentAmount) {
+        const order = await prisma.order.findUnique({
+          where: { orderId }
+        });
+        if (order) {
+          paymentAmount = order.amount;
+        } else {
+          return res.status(404).json({ error: 'Order not found' });
+        }
+      }
+
+      // ✅ Pass phone number as well if needed
+     const payment = await PaymentService.initiatePayment(orderId, paymentAmount);
 
       res.json(payment);
 
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error('STK Push error:', error);
       res.status(500).json({ 
         error: 'STK push failed',
         details: error.response?.data || error.message,

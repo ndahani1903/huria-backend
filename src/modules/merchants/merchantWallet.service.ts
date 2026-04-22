@@ -1,5 +1,6 @@
 import { prisma } from '../../config/db';
 import { NotificationService } from '../notifications/notification.service';
+import { SMSService } from '../../services/sms.service';
 
 export class MerchantWalletService {
   
@@ -32,6 +33,43 @@ export class MerchantWalletService {
     return wallet;
   }
   
+  static async credit(merchantId: string, amount: number) {
+     try {
+      const wallet = await prisma.merchantWallet.update({
+      where: { merchantId },
+      data: {
+        balance: { increment: amount },
+       },
+        //create: {
+         // merchantId,
+         // balance: amount,
+     // },
+    });
+
+console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balance: ${wallet.balance}`);
+
+ // ✅ SMS: Notify merchant about credit
+    const merchant = await prisma.merchant.findUnique({
+      where: { id: merchantId },
+      include: { user: true }
+    });
+    
+    if (merchant?.user?.phone) {
+      await NotificationService.sendSMS(
+        merchant.user.phone,
+      `💰 ${amount} TZS has been added to your wallet`
+      );
+ await SMSService.send(merchant.user.phone, amount, `💰 ${amount} TZS added to your wallet from order completion. Total balance: ${wallet.balance} TZS`);
+    }
+     
+
+    return wallet;
+} catch (error) {
+      console.error(`Failed to credit merchant ${merchantId}:`, error);
+      throw error;
+    }
+  }
+
   // Add pending credit (when order is paid but not completed)
   static async addPendingCredit(merchantId: string, orderId: string, amount: number) {
     const wallet = await this.getOrCreateWallet(merchantId);

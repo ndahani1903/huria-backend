@@ -8,6 +8,7 @@ import { MapsService } from "../../services/maps.service";
 import { WalletService } from "../wallet/wallet.service";
 import { EscrowService } from '../../services/escrow.service';
 import { SMSService } from '../../services/sms.service';
+import { MerchantWalletService } from "../merchants/merchantWallet.service";
 
 export class OrderService {
   static async create(orderId: string, amount: number, pickupLat: number, pickupLng: number) {
@@ -190,9 +191,9 @@ io.emit("order:update", {
     }
 
    // ✅ ADD DELAY or ensure order is committed
-  setTimeout(async () => {
-     await this.assignDriver(orderId);  // 🔥 ADD THIS LINE (AUTO DISPATCH)
-     }, 1000); // Small delay for DB commit
+  //setTimeout(async () => {
+     //await this.assignDriver(orderId);  // ADD THIS LINE (AUTO DISPATCH)
+     //}, 1000); // Small delay for DB commit
 
     return updated;
   }
@@ -230,10 +231,6 @@ io.emit("order:update", {
     order.user.phone,
    `Your order ${orderId} has been delivered. OTP for completion: ${otp}`
       );
-    }
-
-// ✅ SMS: Send OTP to customer
-    if (order?.user?.phone) {
       await SMSService.sendOrderDelivered(order.user.phone, orderId, otp);
     }
 
@@ -241,64 +238,94 @@ io.emit("order:update", {
   }
 
  static async complete(orderId: string, otp: string) {
+   try {
+    console.log(`🔍 Completing order ${orderId} with OTP: ${otp}`);
+    
+    // ✅ FIX: Include driver with user relation properly
     const order = await prisma.order.findUnique({
       where: { orderId },
+     include: { 
+        driver: { 
+          include: { user: true } 
+        }, 
+       user: true 
+      }
     });
 
 if (!order) {
   throw new Error('Order not found');
 }
 
-//temporary bypass this otp check
-    if (!order || order.otp !== otp) {
-      throw new Error('Invalid OTP');
-    } 
+  console.log(`📦 Order found - Status: ${order.status}, OTP in DB: ${order.otp}`);
+
+ // Verify OTP (only if status is delivered)
+    if (order.status === 'delivered') {
+      if (order.otp !== otp) {
+        throw new Error('Invalid OTP');
+      }
+    }
+
+// Check if already completed
+  if (order.status === 'completed') {
+    throw new Error('Order already completed');
+  }
+
  
     // ✅ RELEASE PAYMENT FROM ESCROW
-  await EscrowService.releasePayment(orderId);
+ try {
+      await EscrowService.releasePayment(orderId);
+      console.log(`💰 Payment released from escrow for order ${orderId}`);
+    } catch (escrowError) {
+      console.error("Escrow release error:", escrowError);
+      // Continue anyway
+    }
 
+   // ✅ UPDATE ORDER STATUS TO COMPLETED
     const updated = await prisma.order.update({
       where: { orderId },
       data: { status: 'completed' },
     });
 
+    console.log(`✅ Order ${orderId} status updated to completed`);
+
 // 💰 CREDIT DRIVER
 if (updated.driverId) {
   const driverAmount = updated.amount * 0.8; // 80% to driver
-  await WalletService.credit(updated.driverId, driverAmount);
+  try {
+        await WalletService.credit(updated.driverId, driverAmount);
+        console.log(`💰 Credited driver ${updated.driverId} with ${driverAmount} TZS`);
 
 
-// ✅ SMS: Notify driver about earnings
+// ✅ SMS: Notify driver about earnings via SMS if phone exists
       const driverUser = order.driver?.user;
       if (driverUser?.phone) {
         await SMSService.sendDriverEarnings(driverUser.phone, driverAmount, orderId);
+     await NotificationService.sendSMS(
+          driverUser.phone,
+          `Order ${orderId} completed! ${driverAmount} TZS added to your wallet.` );
       }
-
-  // Notify driver
-      const driver = await prisma.driver.findUnique({
-        where: { id: updated.driverId },
-        include: { user: true }
-      });
-      
-      if (driver?.user?.phone) {
-        await NotificationService.sendSMS(
-          driver.user.phone,
-          `Order ${orderId} completed! ${driverAmount} TZS added to your wallet.`
-        );
+    }  catch (creditError) {
+        console.error("Driver credit error:", creditError);
       }
     }
 
  // 🔥 FREE DRIVER
-  if (order.driverId) {
-    await DriverService.markAvailable(order.driverId);
+  if (updated.driverId) {
+      try {
+        await DriverService.markAvailable(updated.driverId);
+        console.log(`🚚 Driver ${updated.driverId} marked as available`);
+      } catch (driverError) {
+        console.error("Driver availability error:", driverError);
+      }
   }
 
     // 💰 RELEASE PAYMENT TO MERCHANT
   // Get all order items to credit merchants
-  const orderItems = await prisma.orderItem.findMany({
-    where: { orderId: order.id },
-    include: { product: true }
-  });
+   try {
+      const orderItems = await prisma.orderItem.findMany({
+        where: { orderId: order.id },
+        include: { product: true }
+      });
   
   // Group by merchant
   const merchantPayments = new Map();
@@ -306,7 +333,7 @@ if (updated.driverId) {
     const merchantId = item.merchantId;
     const amount = item.price * item.quantity;
     if (merchantPayments.has(merchantId)) {
-      merchantPayments.set(merchantId, merchantPayments.get(merchantId) + amount);
+      merchantPayments.set(merchantId, (merchantPayments.get(merchantId) || 0) + amount);
     } else {
       merchantPayments.set(merchantId, amount);
     }
@@ -315,9 +342,13 @@ if (updated.driverId) {
 // Credit merchants (u need a MerchantWallet table/add to merchant model)
   for (const [merchantId, amount] of merchantPayments) {
     console.log(`💰 Merchant ${merchantId} gets ${amount} TZS`);
-    // await MerchantWalletService.credit(merchantId, amount);
+     await MerchantWalletService.credit(merchantId, amount);
   }
+ } catch (merchantError) {
+      console.error("Merchant credit error:", merchantError);
+    }
 
+    // ✅ EMIT REAL-TIME UPDATE
 io.emit("order:update", {
     orderId,
     status: "completed",
@@ -325,7 +356,12 @@ io.emit("order:update", {
 
 console.log("📡 Order completed:", orderId);
   return updated;
+  } catch (error: any) {
+    console.error("❌ Complete order error:", error.message);
+    console.error("Stack:", error.stack);
+    throw error; // Re-throw to be caught by controller
   }
+}
 
   static async get(orderId: string) {
     return prisma.order.findUnique({

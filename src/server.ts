@@ -18,8 +18,10 @@ import walletRoutes from "./modules/wallet/wallet.routes";
 import withdrawalRoutes from "./modules/withdrawal/withdrawal.routes";
 import productRoutes from './modules/products/product.routes';
 import merchantRoutes from './modules/merchants/merchant.routes';
+import merchantWalletRoutes from './modules/merchants/merchantWallet.routes';
 
 const httpServer = http.createServer(app);
+const lastLogTime: Record<string, number> = {};
 
 app.use('/api/orders', orderRoutes);
 app.use('/api/drivers', driverRoutes);
@@ -30,6 +32,7 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/withdrawals", withdrawalRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/merchants', merchantRoutes);
+app.use('/api/merchants', merchantWalletRoutes);
 
 export const io = new Server(httpServer, {
   cors: {
@@ -102,13 +105,19 @@ socket.on("driver:location", async (data) => {
       console.error("No driverId provided");
       return;
     }
-   console.log("📡 Saving location:", driverId, lat, lng);
+
+     // ✅ Reduce logging frequency - only log every 30 seconds
+     const now = Date.now();
+    if (!lastLogTime[driverId] || now - lastLogTime[driverId] > 30000) {
+       console.log("📡 Saving location:", driverId, lat, lng);
+       lastLogTime[driverId] = now;
+      }
 
     await redis.set(
       `driver:${driverId}:location`,
-      JSON.stringify({ lat, lng }),
+      JSON.stringify({ lat, lng, timestamp: now }),
       "EX",
-      10 // 🔥 expires in 10 sec
+      60 // 🔥 expires in 60 sec
     );
 
    // optional: broadcast for tracking
