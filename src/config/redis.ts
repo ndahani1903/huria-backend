@@ -21,7 +21,7 @@ redis.on('ready', () => console.log('✅ Redis client ready'));
 
 // ✅ Connect when the app is ready
 // Export a function to ensure connection is ready
-(export async function initRedis() {
+(async function initRedis() {
   try {
     if (!redis.isOpen) {
       await redis.connect();
