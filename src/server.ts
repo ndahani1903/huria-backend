@@ -40,7 +40,7 @@ export const io = new Server(httpServer, {
   }
 });
 
-const redisUrl = process.env.redis://default:ytTLWKXYcpRTskkxmMrWyfxwaQOUfwUL@redis.railway.internal:6379 || "redis://localhost:6379";
+const redisUrl = process.env."redis://default:ytTLWKXYcpRTskkxmMrWyfxwaQOUfwUL@redis.railway.internal:6379" || "redis://localhost:6379";
 
 const pubClient = createClient({ url: redisUrl });
 const subClient = pubClient.duplicate();
