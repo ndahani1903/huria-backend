@@ -9,12 +9,26 @@ export const redis = createClient({
 
 redis.on('error', (err) => console.error('Redis Client Error:', err));
 redis.on('connect', () => console.log('🟢 Redis connected'));
+redis.on('ready', () => console.log('✅ Redis client ready'));
 
-
-// ✅ Connect when the app is ready
-// This will be called from server.ts or main entry point
-export async function connectRedis() {
+// Auto-connect when the module loads
+(async () => {
   if (!redis.isOpen) {
     await redis.connect();
+    console.log('🔌 Redis client connected successfully');
   }
-}
+})();
+
+// ✅ Connect when the app is ready
+// Export a function to ensure connection is ready
+export async function ensureRedisConnection() {
+  try {
+    if (!redis.isOpen) {
+      await redis.connect();
+    }
+  } catch (err) {
+    console.error('Redis connection failed:', err);
+  }
+})();
+
+export default redis;

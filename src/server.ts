@@ -20,6 +20,19 @@ import productRoutes from './modules/products/product.routes';
 import merchantRoutes from './modules/merchants/merchant.routes';
 import merchantWalletRoutes from './modules/merchants/merchantWallet.routes';
 
+
+// Ensure Redis is connected
+(async () => {
+  try {
+    if (!redis.isOpen) {
+      await redis.connect();
+      console.log('✅ Main Redis client connected');
+    }
+  } catch (err) {
+    console.error('Failed to connect Redis:', err);
+  }
+})();
+
 const httpServer = http.createServer(app);
 const lastLogTime: Record<string, number> = {};
 
