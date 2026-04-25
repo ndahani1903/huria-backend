@@ -82,8 +82,10 @@ console.log("Created product - images column value:", created.images);
 }
 
   static async getById(productId: string) {
+    const id = typeof productId === 'string' ? productId : String(productId);
+
     const product = await prisma.product.findUnique({
-      where: { id: productId },
+      where: { id: id },
       include: {
         merchant: {
           include: {
