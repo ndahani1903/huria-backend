@@ -1,6 +1,17 @@
 import { Request, Response } from "express";
 import { AdminService } from "./admin.service";
+import { getAuditLogs } from "./audit.service";
 import { prisma } from "../../config/db";
+import { DisputeService } from "../disputes/dispute.service";
+
+export async function fetchAuditLogs(req: any, res: any) {
+  try {
+    const logs = await getAuditLogs();
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch audit logs" });
+  }
+}
 
 export class AdminController {
    // Get platform stats
@@ -108,25 +119,26 @@ export class AdminController {
   // 🔄 UPDATE DISPUTE
   static async updateDispute(req: Request, res: Response) {
     try {
-      const { id } = req.params;
-      const { status, resolution } = req.body;
+    const { id } = req.params;
+    const { status } = req.body;
+    const adminId = (req as any).user?.id;
+
+    // ✅ Ensure id is a string (not string array)
+    const disputeId = Array.isArray(id) ? id[0] : id;
+
+    let result;
       
-      const dispute = await prisma.dispute.update({
-        where: { id: id as string},
-        data: {
-          status,
-          resolution,
-          resolvedAt: new Date(),
-          resolvedById: (req as any).user?.id
-        }
-      });
-      
-      res.json(dispute);
-    } catch (error: any) {
-      console.error("Update dispute error:", error);
-      res.status(500).json({ error: error.message });
+      if (status === "resolved") {
+      result = await DisputeService.resolve(disputeId, adminId);
+    } else {
+      result = await DisputeService.reject(disputeId, adminId);
     }
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
   }
+}
 
   // 💰 GET WITHDRAWALS
   static async getWithdrawals(req: Request, res: Response) {

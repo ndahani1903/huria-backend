@@ -109,7 +109,8 @@ model User {
   merchant Merchant? // one-to-one with merchant
   orders   Order[]
   pushTokens PushToken[]
-  disputes    Dispute[] 
+  disputes    Dispute[]
+  auditLogs   AuditLog[] 
 }
 
 model Wallet {
@@ -164,7 +165,7 @@ model Product {
   description String?                    // ✅ DESCRIPTION FIELD
   isActive    Boolean   @default(true)  //Add field for soft delete
   image       String?
-  images      String?  // ✅ Array of multiple images
+  images      String[] // ✅ Array of multiple images
   variants    Json?     // ✅ Store variants as JSON (sizes, colors)
   category   String?  // electronics, clothes, groceries, etc.
   merchantId  String
@@ -266,4 +267,21 @@ model PushToken {
   createdAt  DateTime @default(now())
 
   user       User     @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  adminId     String
+  action      String   // RESOLVE_DISPUTE, REJECT_DISPUTE, etc.
+  targetType  String   // "dispute", "withdrawal", "order"
+  targetId    String
+  meta        Json?
+  createdAt   DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  admin      User     @relation(fields: [adminId], references: [id])
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@index([targetType, targetId])
 }

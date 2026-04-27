@@ -2,6 +2,9 @@ import { Router } from "express";
 import { AdminController } from "./admin.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/role.middleware";
+import {
+ fetchAuditLogs
+} from "./admin.controller";
 
 const router = Router();
 
@@ -22,6 +25,8 @@ router.get("/orders", authMiddleware, requireRole("admin"), AdminController.getO
 
 //Analytics management
 router.get("/analytics", authMiddleware, requireRole("admin"), AdminController.getAnalytics);
+
+router.get("/audit-logs", fetchAuditLogs);
 
 //top drivers
 router.get("/top-drivers", authMiddleware, requireRole("admin"), AdminController.topDrivers);

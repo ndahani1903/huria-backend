@@ -1,85 +1,107 @@
 import { prisma } from "../../config/db";
-import { SMSService } from '../../services/sms.service';
+import { SMSService } from "../../services/sms.service";
+import { createAuditLog } from "../admin/audit.service";
 
 export class WithdrawalService {
   static async request(driverId: string, amount: number) {
-    // ✅ FIX: Get wallet with correct driverId relation
     const driver = await prisma.driver.findUnique({
       where: { id: driverId },
-      include: { user: true, wallet: true } //for two we separate by comma
+      include: { user: true, wallet: true }
     });
 
-    if (!driver) {
-      throw new Error("Driver not found");
+    if (!driver) throw new Error("Driver not found");
+    if (!driver.wallet) throw new Error("Wallet not found");
+
+    if (driver.wallet.balance < amount) {
+      throw new Error("Insufficient balance");
     }
 
-    const wallet = driver.wallet;
+    const withdrawal = await prisma.$transaction(async (tx) => {
+      await tx.wallet.update({
+        where: { id: driver.wallet!.id },
+        data: {
+          balance: driver.wallet!.balance - amount
+        }
+      });
 
-    if (!wallet) {
-      throw new Error("Wallet not found");
-    }
-
-    console.log(`💰 Withdrawal check: Balance=${wallet.balance}, Requested=${amount}`);
-
-    if (wallet.balance < amount) {
-      throw new Error(`Insufficient balance. Available: ${wallet.balance} TZS`);
-    }
-    
-     // Deduct balance
-    await prisma.wallet.update({
-      where: { id: wallet.id }, // ✅ Use wallet.id instead of driverId
-      data: {
-        balance: wallet.balance - amount,
-      },
+      return tx.withdrawal.create({
+        data: {
+          driverId,
+          amount,
+          status: "pending"
+        }
+      });
     });
 
-    const withdrawal = await prisma.withdrawal.create({
-      data: {
-        driverId,
-        amount,
-        status: "pending",
-      },
-    });
-
- // ✅ SMS: Notify driver about withdrawal request
-    if (driver?.user?.phone) {
-      await SMSService.send(driver.user.phone, `💰 Withdrawal request of TZS ${amount} submitted. We'll process within 24 hours.`);
+    if (driver.user?.phone) {
+      await SMSService.send(
+        driver.user.phone,
+        `💰 Withdrawal request of TZS ${amount} submitted.`
+      );
     }
 
     return withdrawal;
   }
 
-   static async getAll() {
+  static async getAll() {
     return prisma.withdrawal.findMany({
       include: {
-        driver: {
-          include: { user: true }
-        }
+        driver: { include: { user: true } }
       }
     });
   }
 
-// ✅ NEW METHOD: Process withdrawal (admin)
-  static async processWithdrawal(withdrawalId: string, status: 'approved' | 'rejected') {
+  static async processWithdrawal(
+    withdrawalId: string,
+    status: "approved" | "rejected",
+    adminId: string
+  ) {
     const withdrawal = await prisma.withdrawal.findUnique({
       where: { id: withdrawalId },
-      include: { driver: { include: { user: true } } }
+      include: {
+        driver: { include: { user: true, wallet: true } }
+      }
     });
 
     if (!withdrawal) throw new Error("Withdrawal not found");
 
-    const updated = await prisma.withdrawal.update({
+   const updated = await prisma.$transaction(async (tx) => {
+    // If rejected, refund wallet
+    if (status === "rejected") {
+      await tx.wallet.update({
+        where: { id: withdrawal.driver.wallet.id },
+        data: {
+          balance: {
+            increment: withdrawal.amount
+          }
+        }
+      });
+    }
+
+    return tx.withdrawal.update({
       where: { id: withdrawalId },
       data: { status }
     });
+  });
 
-    // ✅ SMS: Notify driver about withdrawal status
+    await createAuditLog({
+      adminId,
+      action:
+        status === "approved"
+          ? "APPROVE_WITHDRAWAL"
+          : "REJECT_WITHDRAWAL",
+      targetType: "withdrawal",
+      targetId: withdrawal.id,
+      meta: { amount: withdrawal.amount }
+    });
+
     if (withdrawal.driver?.user?.phone) {
-      const message = status === 'approved' 
-        ? `✅ Your withdrawal of TZS ${withdrawal.amount} has been approved and sent to your mobile money.`
-        : `❌ Your withdrawal of TZS ${withdrawal.amount} was rejected. Please contact support.`;
-      
-      await SMSService.send(withdrawal.driver.user.phone, message);
+      await SMSService.send(
+        withdrawal.driver.user.phone,
+        status === "approved"
+          ? `✅ Withdrawal approved`
+          : `❌ Withdrawal rejected`
+      );
     }
 
     return updated;

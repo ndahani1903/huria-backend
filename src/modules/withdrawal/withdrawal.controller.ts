@@ -30,6 +30,30 @@ export class WithdrawalController {
     }
   }
 
+
+ static async process(req: AuthRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      const adminId = req.user?.id;
+      
+      // ✅ Ensure id is a string
+      const withdrawalId = Array.isArray(id) ? id[0] : id;
+
+     const result = await WithdrawalService.processWithdrawal(
+      withdrawalId,
+      status,
+      adminId
+     );
+
+    res.json(result);
+    } catch (error: any) {
+      console.error("Process withdrawal error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+
   static async getAll(req: AuthRequest, res: Response) {
     const data = await WithdrawalService.getAll();
     res.json(data);
