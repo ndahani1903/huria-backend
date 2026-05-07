@@ -139,13 +139,13 @@ static async initDriverAvailability(driverId: string) {
   static async heartbeat(driverId: string, lat: number, lng: number) {
     // Update location with extended expiry
     const key = `driver:${driverId}:location`;
-    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), { EX: 60, } );
+    await redis.setEx(key, 60, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }) );
     
     // Ensure they're in available set
-    await redis.sAdd("drivers:available", driverId);
+    await redis.sadd("drivers:available", driverId);
     
     // Update last seen timestamp
-    await redis.set(`driver:${driverId}:lastSeen`, Date.now().toString(), { EX: 70, });
+    await redis.setEx(`driver:${driverId}:lastSeen`, 70, Date.now().toString());
     
     return { success: true };
   }
@@ -170,7 +170,7 @@ static async initDriverAvailability(driverId: string) {
           
           if (isStale && driver.status === 'available') {
             // Driver hasn't sent heartbeat in 5 minutes
-            await redis.sRem("drivers:available", driver.id);
+            await redis.srem("drivers:available", driver.id);
             await redis.del(`driver:${driver.id}:location`);
             await prisma.driver.update({
               where: { id: driver.id },
@@ -244,8 +244,8 @@ static async initDriverAvailability(driverId: string) {
   // ✅ UPDATE LOCATION (with heartbeat)
   static async updateLocation(driverId: string, lat: number, lng: number) {
     const key = `driver:${driverId}:location`;
-    await redis.set(key, JSON.stringify({ lat, lng, timestamp: Date.now() }),
-     { EX: 60, }  // ✅ Fixed: Use object syntax instead of 4 arguments
+    await redis.setEx(key, 60, JSON.stringify({ lat, lng, timestamp: Date.now() })
+// ✅ Fixed: Use object syntax instead of 4 arguments
     );
     console.log(`📍 Driver ${driverId} location updated`);
 
