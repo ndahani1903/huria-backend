@@ -2,7 +2,14 @@ import admin from 'firebase-admin';
 import { prisma } from '../config/db';
 
 // Initialize Firebase Admin
-const serviceAccount = require('../config/firebase-service-account.json');
+/*const serviceAccount = require('../config/firebase-service-account.json');*/
+
+ // Firebase config from environment variables
+const serviceAccount = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+};
 
 if (!admin.apps.length) {
   admin.initializeApp({
