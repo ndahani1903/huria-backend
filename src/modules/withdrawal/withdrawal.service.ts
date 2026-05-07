@@ -1,6 +1,13 @@
 import { prisma } from "../../config/db";
 import { SMSService } from "../../services/sms.service";
 import { createAuditLog } from "../admin/audit.service";
+import { Decimal } from "@prisma/client/runtime/library";
+
+export const toNumber = (val: any): number => {
+  if (!val) return 0;
+  if (val instanceof Decimal) return val.toNumber();
+  return Number(val);
+};
 
 export class WithdrawalService {
   static async request(driverId: string, amount: number) {
@@ -12,15 +19,15 @@ export class WithdrawalService {
     if (!driver) throw new Error("Driver not found");
     if (!driver.wallet) throw new Error("Wallet not found");
 
-    if (driver.wallet.balance < amount) {
-      throw new Error("Insufficient balance");
+  if (new Decimal(driver.wallet.balance).lessThan(amount)) {
+       throw new Error("Insufficient balance");
     }
 
     const withdrawal = await prisma.$transaction(async (tx) => {
       await tx.wallet.update({
         where: { id: driver.wallet!.id },
         data: {
-          balance: driver.wallet!.balance - amount
+          balance: toNumber(driver.wallet!.balance) - amount
         }
       });
 
@@ -34,7 +41,7 @@ export class WithdrawalService {
     });
 
     if (driver.user?.phone) {
-      await SMSService.send(
+      await SMSService.sendRealSMS(
         driver.user.phone,
         `💰 Withdrawal request of TZS ${amount} submitted.`
       );
@@ -96,7 +103,7 @@ export class WithdrawalService {
     });
 
     if (withdrawal.driver?.user?.phone) {
-      await SMSService.send(
+      await SMSService.sendRealSMS(
         withdrawal.driver.user.phone,
         status === "approved"
           ? `✅ Withdrawal approved`

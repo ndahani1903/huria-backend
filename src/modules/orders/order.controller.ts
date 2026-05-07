@@ -1,14 +1,18 @@
 import { Response } from 'express';
 import { OrderService } from './order.service';
 import { AuthRequest } from '../../middleware/auth.middleware';
+import { prisma } from '../../config/db'; 
 
 export class OrderController {
   static async create(req: AuthRequest, res: Response) {
     try {
       const { orderId, amount, pickupLat, pickupLng } = req.body;
-
-      const order = await OrderService.create(orderId, amount, pickupLat, pickupLng);
-
+// Option 1: Get from request
+const userId = req.user!.id;
+const orderData = req.body;
+      const order = await OrderService.create(orderId, amount, pickupLat, pickupLng, userId, orderData);
+console.log("🧾 SAVED ORDER USER ID:", order.userId);
+console.log("🧾 REQUEST USER ID:", userId);
       res.json(order);
     } catch (error: any) {
     console.error("CREATE ORDER ERROR:", error); // 👈 IMPORTANT
@@ -20,7 +24,8 @@ export class OrderController {
 
   static async checkout(req: AuthRequest, res: any) {
   try {
-    const { items, pickupLat, pickupLng } = req.body;
+   const { items, pickupLat, pickupLng, deliveryAddressId } = req.body;
+//const { items, pickupLat, pickupLng, deliveryAddressId } = req.body;
 
    // ✅ CHECK IF USER EXISTS
       if (!req.user) {
@@ -34,12 +39,14 @@ export class OrderController {
       }
 
       console.log("✅ Checkout for user:", req.user.id); // ✅ DEBUG
+console.log("📥 Incoming checkout body:", req.body);
 
     const order = await OrderService.checkout(
       req.user.id,
       items,
       pickupLat,
-      pickupLng
+     pickupLng,
+      deliveryAddressId
     );
 
     res.json(order);
@@ -52,8 +59,8 @@ export class OrderController {
   static async deliver(req: AuthRequest, res: Response) {
     try {
       const { orderId } = req.body;
-
-      const order = await OrderService.markDelivered(orderId);
+      const driverId = req.user.driverId;
+      const order = await OrderService.markDelivered(orderId, driverId);
 
       res.json(order);
     } catch (error) {
@@ -75,7 +82,10 @@ export class OrderController {
 
   static async get(req: AuthRequest, res: Response) {
 try {
- const { orderId } = req.params;
+ const toStringParam = (v: string | string[]) =>
+  Array.isArray(v) ? v[0] : v;
+
+const orderId = toStringParam(req.params.orderId);
 
  const order = await OrderService.get(orderId as string);  // ✅ Cast to string
 
@@ -84,6 +94,43 @@ try {
       res.status(500).json({ error: 'Fetch failed' });
     }
   }
+
+
+
+static async getMyOrders(req: AuthRequest, res: Response) {
+  try {
+    console.log("=== getMyOrders Controller ===");
+    
+    if (!req.user || !req.user.id) {
+      console.error("No user in request");
+      return res.status(401).json([]);
+    }
+    
+    const userId = req.user.id;
+    console.log("Fetching orders for userId:", userId);
+    
+    const orders = await prisma.order.findMany({
+      where: { userId: userId },
+      include: {
+        items: {
+          include: { product: true }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    
+    console.log(`Found ${orders.length} orders`);
+    res.json(orders);
+    
+  } catch (error: any) {
+    console.error("Error in getMyOrders:", error);
+    console.error("Stack:", error.stack);
+    res.status(500).json([]);
+  }
+}
+
+
+
 
 static async assignDriver(req: AuthRequest, res: Response) {
   try {
@@ -100,9 +147,94 @@ static async assignDriver(req: AuthRequest, res: Response) {
   }
 }
 
+ static async merchantConfirmOrder(req: AuthRequest, res: Response) {
+    try {
+      const toStringParam = (v: string | string[]) =>
+  Array.isArray(v) ? v[0] : v;
+
+      const orderId = toStringParam(req.params.orderId);
+     // const merchantId = req.user.merchantId;
+     const merchant = await prisma.merchant.findUnique({
+  where: { userId: req.user.id }
+});
+
+const merchantId = merchant?.id;
+
+console.log("👉 PARAM orderId:", orderId);
+    console.log("👉 TOKEN merchantId:", merchantId);
+
+const order = await prisma.order.findUnique({ where: { orderId } });
+
+    console.log("👉 DB order merchantId:", order?.merchantId);
+
+      const result = await OrderService.merchantConfirmOrder(orderId, merchantId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async driverArrivedPickup(req: AuthRequest, res: Response) {
+    try {
+      const toStringParam = (v: string | string[]) =>
+  Array.isArray(v) ? v[0] : v;
+
+      const orderId = toStringParam(req.params.orderId);
+      const driverId = req.user.driverId;
+      const result = await OrderService.driverArrivedPickup(orderId, driverId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async pickupOrder(req: AuthRequest, res: Response) {
+    try {
+      const toStringParam = (v: string | string[]) =>
+  Array.isArray(v) ? v[0] : v;
+
+      const orderId = toStringParam(req.params.orderId);
+      const driverId = req.user.driverId;
+      const result = await OrderService.pickupOrder(orderId, driverId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async enRouteToCustomer(req: AuthRequest, res: Response) {
+    try {
+      const toStringParam = (v: string | string[]) =>
+  Array.isArray(v) ? v[0] : v;
+
+      const orderId = toStringParam(req.params.orderId);
+      const driverId = req.user.driverId;
+      const result = await OrderService.enRouteToCustomer(orderId, driverId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getTripStage(req: AuthRequest, res: Response) {
+    try {
+      const toStringParam = (v: string | string[]) =>
+  Array.isArray(v) ? v[0] : v;
+
+      const orderId = toStringParam(req.params.orderId);
+      const result = await OrderService.getTripStage(orderId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
 static async tracking(req: AuthRequest, res: Response) {
   try {
-    const { orderId } = req.params;
+    const toStringParam = (v: string | string[]) =>
+  Array.isArray(v) ? v[0] : v;
+
+   const orderId = toStringParam(req.params.orderId);
 
     const data = await OrderService.getTracking(orderId as string);
 
@@ -110,5 +242,16 @@ static async tracking(req: AuthRequest, res: Response) {
   } catch (error) {
     res.status(500).json({ error: "Tracking failed" });
   }
+ }
+
+static async merchantOrders(req, res) {
+ const data = await OrderService.getMerchantOrders(req.user!.id);
+ res.json(data);
 }
+
+static async merchantStats(req, res) {
+ const data = await OrderService.getMerchantStats(req.user!.id);
+ res.json(data);
+}
+
 }

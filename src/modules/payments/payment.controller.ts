@@ -3,11 +3,16 @@ import { MpesaService } from './mpesa.service';
 import { PaymentService } from './payment.service';
 import { WebhookService } from './webhook.service';
 import { prisma } from '../../config/db';  // ✅ Add this import
+import { stkPushSchema } from './payment.validator';
 
 export class PaymentController {
   static async stkPush(req: Request, res: Response) {
     try {
-      const { orderId, amount, phone } = req.body;
+      console.log("BODY RECEIVED:", req.body); 
+    //validates wrong no,missing order id and neg amount
+       const data = stkPushSchema.parse(req.body);
+
+      const { orderId, amount, phone } = data;
 
      // ✅ Validate required fields
       if (!orderId) {
@@ -25,14 +30,29 @@ export class PaymentController {
           where: { orderId }
         });
         if (order) {
-          paymentAmount = order.amount;
+          paymentAmount = Number(order.amount);
         } else {
           return res.status(404).json({ error: 'Order not found' });
         }
       }
 
+
       // ✅ Pass phone number as well if needed
      const payment = await PaymentService.initiatePayment(orderId, phone || '', paymentAmount);
+ 
+ /* after intergrating mpesa
+ await PaymentService.initiatePayment(orderId, phone, paymentAmount);
+
+const gateway = await MpesaService.stkPush(
+   phone,
+   paymentAmount,
+   orderId
+);
+
+res.json({
+   success: true,
+   gateway
+}); */
 
       res.json(payment);
 

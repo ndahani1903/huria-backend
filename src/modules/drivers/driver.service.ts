@@ -1,6 +1,7 @@
 import { prisma } from '../../config/db';
 import { redis } from "../../config/redis";
 import { io } from "../../server";
+import driverGamificationService from '../drivers/gamification.service';
 
 export class DriverService {
   /* static async create(name: string, phone: string) {
@@ -41,7 +42,7 @@ static async acceptOrder(orderId: string, driverId: string) {
       where: { orderId },
       data: {
         driverId,
-        status: "accepted",
+        status: "assigned",
       },
     });
 }
@@ -213,7 +214,7 @@ static async initDriverAvailability(driverId: string) {
     return order;
   }
 
-  static async completeOrder(orderId: string) {
+ static async completeOrder(orderId: string, driverId?: string) {
     const order = await prisma.order.findUnique({
       where: { orderId },
     });
@@ -222,10 +223,20 @@ static async initDriverAvailability(driverId: string) {
       throw new Error("Order not delivered yet");
     }
 
-    await prisma.order.update({
-      where: { orderId },
-      data: { status: "completed" },
+     await prisma.order.update({
+    where: { orderId },
+    data: { status: "completed", completedAt: new Date() },
     });
+
+  // ✅ TRIGGER GAMIFICATION - Update driver stats and achievements
+  if (driverId) {
+    try {
+      await driverGamificationService.updateDriverStats(driverId, orderId);
+      console.log(`🏆 Gamification updated for driver ${driverId}`);
+    } catch (error) {
+      console.error('Gamification update failed:', error);
+    }
+  }
 
     return { message: "Order completed" };
   }

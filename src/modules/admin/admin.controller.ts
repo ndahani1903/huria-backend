@@ -3,6 +3,13 @@ import { AdminService } from "./admin.service";
 import { getAuditLogs } from "./audit.service";
 import { prisma } from "../../config/db";
 import { DisputeService } from "../disputes/dispute.service";
+import { Decimal } from "@prisma/client/runtime/library";
+
+export const toNumber = (val: any): number => {
+  if (!val) return 0;
+  if (val instanceof Decimal) return val.toNumber();
+  return Number(val);
+};
 
 export async function fetchAuditLogs(req: any, res: any) {
   try {
@@ -183,19 +190,22 @@ export class AdminController {
     where: { status: "completed" },
   });
 
-  const totalRevenue = orders.reduce((sum, o) => sum + o.amount, 0);
+const totalRevenue = orders.reduce(
+  (sum, o) => sum + toNumber(o.amount),
+  0
+);
   const totalDeliveryFees = orders.reduce(
-    (sum, o) => sum + (o.deliveryFee || 0),
+    (sum, o) => sum + toNumber(o.deliveryFee || 0),
     0
   );
 
   const platformProfit = orders.reduce(
-    (sum, o) => sum + (o.platformFee || 0),
+    (sum, o) => sum + toNumber(o.platformFee || 0),
     0
   );
 
   const driverPayout = orders.reduce(
-    (sum, o) => sum + (o.driverEarning || 0),
+    (sum, o) => sum + toNumber(o.driverEarning || 0),
     0
   );
 

@@ -28,3 +28,4 @@ export const deleteFromCloudinary = async (publicId: string): Promise<void> => {
     console.error('Cloudinary delete error:', error);
   }
 };
+

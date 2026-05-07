@@ -1,6 +1,13 @@
 import { prisma } from '../config/db';
 import { MerchantWalletService } from '../modules/merchants/merchantWallet.service';
 import { WalletService } from '../modules/wallet/wallet.service';
+import { Decimal } from "@prisma/client/runtime/library";
+
+export const toNumber = (val: any): number => {
+  if (!val) return 0;
+  if (val instanceof Decimal) return val.toNumber();
+  return Number(val);
+};
 
 export class EscrowService {
   
@@ -26,7 +33,7 @@ export class EscrowService {
     
     for (const item of order.items) {
       const merchantId = item.product.merchantId;
-      const itemAmount = item.price * item.quantity;
+      const itemAmount = toNumber(item.price) * item.quantity;
       const merchantShare = itemAmount * 0.4; // 40% to merchant
       
       if (merchantMap.has(merchantId)) {
@@ -86,8 +93,8 @@ export class EscrowService {
     if (escrow.status !== 'held') throw new Error('Payment not in escrow');
     
     const totalAmount = escrow.amount;
-    const driverAmount = totalAmount * 0.4;  // 40% to driver
-    const platformAmount = totalAmount * 0.2; // 20% to platform
+    const driverAmount = toNumber(totalAmount) * 0.4;  // 40% to driver
+    const platformAmount = toNumber(totalAmount) * 0.2; // 20% to platform
     // Merchant total is 40% already handled in pending credits
     
     // 1. Credit driver
@@ -131,7 +138,7 @@ export class EscrowService {
     console.log(`✅ Escrow released for order ${orderId}`);
     console.log(`   Driver: ${driverAmount} TZS`);
     console.log(`   Platform: ${platformAmount} TZS`);
-    console.log(`   Merchants: ${escrowMerchants.reduce((sum, em) => sum + em.amount, 0)} TZS`);
+    console.log(`   Merchants: ${escrowMerchants.reduce((sum, em) => sum + toNumber(em.amount), 0)} TZS`);
     
     return updated;
   }

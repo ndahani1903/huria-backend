@@ -2,12 +2,14 @@ import { redis } from "./config/redis";
 import dotenv from "dotenv";
 dotenv.config();
 
+import jwt from "jsonwebtoken";
 import http from "http";
 import { Server } from "socket.io";
 import app from './app';
 import { env } from './config/env';
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient } from "redis";
+import OrderService from "./modules/orders/order.service";
 
 import orderRoutes from './modules/orders/order.routes';
 import driverRoutes from './modules/drivers/driver.routes';
@@ -19,7 +21,22 @@ import withdrawalRoutes from "./modules/withdrawal/withdrawal.routes";
 import productRoutes from './modules/products/product.routes';
 import merchantRoutes from './modules/merchants/merchant.routes';
 import merchantWalletRoutes from './modules/merchants/merchantWallet.routes';
-
+import investorRoutes from './routes/investor.routes';
+import merchantLendingRoutes from './modules/lending/merchantLending.routes';
+import driverLendingRoutes from './modules/lending/driverLending.routes';
+import merchantTierRoutes from './modules/merchants/tiers.routes';
+import subscriptionRoutes from './modules/subscription/subscription.routes';
+import './jobs/subscriptionRenewal.job'; // Start the cron job
+import './jobs/gamificationReset.job';
+import './jobs/tierEvaluation.job';
+import forecastRoutes from './routes/forecast.routes';
+import legalRoutes from './routes/legal.routes';
+import coPilotRoutes from './routes/copilot.routes';
+import addressRoutes from './routes/address.routes';
+import userRoutes from "./modules/users/user.routes";
+import reviewRoutes from './modules/reviews/review.routes';
+import notificationSettingsRoutes from './modules/notifications/notificationSettings.routes';
+import testNotificationRoutes from './modules/notifications/testNotification.routes';
 
 // Ensure Redis is connected
 (async () => {
@@ -36,7 +53,6 @@ import merchantWalletRoutes from './modules/merchants/merchantWallet.routes';
 const httpServer = http.createServer(app);
 const lastLogTime: Record<string, number> = {};
 
-
 app.use('/api/orders', orderRoutes);
 app.use('/api/drivers', driverRoutes);
 app.use('/api/disputes', disputeRoutes);
@@ -47,6 +63,19 @@ app.use("/api/withdrawals", withdrawalRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/merchants', merchantRoutes);
 app.use('/api/merchants', merchantWalletRoutes);
+app.use('/api/investor', investorRoutes);
+app.use('/api/merchants/lending', merchantLendingRoutes);
+app.use('/api/drivers/lending', driverLendingRoutes);
+app.use('/api/merchant/tier', merchantTierRoutes);
+app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/forecast', forecastRoutes);
+app.use('/legal', legalRoutes);
+app.use('/api/copilot', coPilotRoutes);
+app.use('/api/addresses', addressRoutes);
+app.use("/api/users", userRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/users', notificationSettingsRoutes);
+app.use('/api/test', testNotificationRoutes);
 
 export const io = new Server(httpServer, {
   cors: {
@@ -72,17 +101,36 @@ async function initSocketRedis() {
   }
 }
 
+function verifyToken(token: string): any {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET!);
+  } catch {
+    return null;
+  }
+}
+
 initSocketRedis();
 
 io.on("connection", socket => {
  console.log("Client connected:", socket.id);
 
   //driver join
-socket.on("driver:join", (driverId: string) => {
-    socket.join(driverId);
-    console.log(`🚚 Driver joined room: ${driverId}`);
+socket.on("driver:join", async ({ token }) => {
+   const user = verifyToken(token);
+
+   if (!user || user.role !== "driver") return;
+
+   socket.join(`driver:${user.driverId}`);
+    console.log(`🚚 Driver joined room: ${user.driverId}`);
   });
 
+   socket.on("user:join", (userId:string)=>{
+   socket.join(`user:${userId}`);
+});
+
+socket.on("merchant:join", (merchantId:string)=>{
+   socket.join(`merchant:${merchantId}`);
+});
 
 /* type Driver = {
   id: string; 
@@ -118,6 +166,8 @@ setInterval(() => {
 
 
 //driver location update (very important)
+const socketRate = new Map();
+
 socket.on("driver:location", async (data) => {
  const { driverId, lat, lng } = data;
 
@@ -139,9 +189,26 @@ socket.on("driver:location", async (data) => {
       { EX: 60 } // 🔥 expires in 60 sec (Use object syntax)
     );
 
+ const last = socketRate.get(socket.id) || 0;
+
+ if (Date.now() - last < 2000) return;
+
+ socketRate.set(socket.id, Date.now());
+
    // optional: broadcast for tracking
-   io.emit("driver:location", { driverId, lat, lng }); // keep as-is
+  const trackingOrder = await OrderService.getDriverCurrentOrder(driverId);
+
+if (trackingOrder) {
+   io.to(`user:${trackingOrder.userId}`).emit("driver:location",  {
+      driverId,
+      lat,
+      lng
+    });
+  
+  await OrderService.refreshActiveRoute(driverId, lat, lng);
+ }
   });
+
 socket.on("disconnect", () => {
     console.log("❌ Disconnected:", socket.id);
    });
@@ -176,6 +243,16 @@ setInterval(async () => {
     console.log(`💓 Active drivers: ${drivers.length}`);
   }
 }, 30 * 1000); // Every 30 seconds
+
+//10,000 old drivers = memory growth. so Every 10 mins cleanup:
+setInterval(() => {
+   const cutoff = Date.now() - 3600000;
+
+   Object.keys(lastLogTime).forEach(id => {
+      if (lastLogTime[id] < cutoff) delete lastLogTime[id];
+   });
+}, 600000);
+
 
 // At the bottom of server.ts, modify the listen:
 

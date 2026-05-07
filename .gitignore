@@ -1,6 +1,13 @@
 node_modules
 # Keep environment variables out of version control
+
+# Dependencies
 .env
 node_modules/ 
+
+# Build output
 dist/ 
-.env 
+
+# Secrets and credentials
+.env
+firebase-service-account.json

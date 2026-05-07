@@ -1,4 +1,11 @@
 import { prisma } from '../config/db';
+import { Decimal } from "@prisma/client/runtime/library";
+
+export const toNumber = (val: any): number => {
+  if (!val) return 0;
+  if (val instanceof Decimal) return val.toNumber();
+  return Number(val);
+};
 
 export class AnalyticsService {
   
@@ -20,7 +27,7 @@ export class AnalyticsService {
     });
     
     const completedOrders = orders.filter(o => o.status === 'completed');
-    const totalRevenue = completedOrders.reduce((sum, o) => sum + o.amount, 0);
+    const totalRevenue = completedOrders.reduce((sum, o) => sum + toNumber(o.amount), 0);
     
     return {
       date: start,
@@ -76,7 +83,7 @@ export class AnalyticsService {
     const completedOrders = orders.filter(o => o.status === "completed").length;
     const totalRevenue = orders
       .filter(o => o.status === "completed")
-      .reduce((sum, o) => sum + o.amount, 0);
+      .reduce((sum, o) => sum + toNumber(o.amount), 0);
 
     return {
       period: {
@@ -100,7 +107,7 @@ export class AnalyticsService {
     });
     
     const totalDeliveries = orders.length;
-    const totalEarnings = orders.reduce((sum, o) => sum + (o.driverEarning || 0), 0);
+    const totalEarnings = orders.reduce((sum, o) => sum + toNumber(o.driverEarning || 0), 0);
     const avgDeliveryTime = orders.reduce((sum, o) => {
       const deliveryTime = o.updatedAt.getTime() - o.createdAt.getTime();
       return sum + deliveryTime;
@@ -155,7 +162,7 @@ export class AnalyticsService {
       where: { userId: customerId, status: 'completed' },
     });
     
-    const totalSpent = orders.reduce((sum, o) => sum + o.amount, 0);
+    const totalSpent = orders.reduce((sum, o) => sum + toNumber(o.amount), 0);
     const orderCount = orders.length;
     
     return {

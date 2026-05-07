@@ -1,6 +1,7 @@
 import { prisma } from '../../config/db';
 import { NotificationService } from '../notifications/notification.service';
 import { SMSService } from '../../services/sms.service';
+import { Decimal } from "@prisma/client/runtime/library";
 
 export class MerchantWalletService {
   
@@ -55,11 +56,11 @@ console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balanc
     });
     
     if (merchant?.user?.phone) {
-      await NotificationService.sendSMS(
-        merchant.user.phone,
-      `💰 ${amount} TZS has been added to your wallet`
-      );
- await SMSService.send(merchant.user.phone, `💰 ${amount} TZS added to your wallet from order completion. Total balance: ${wallet.balance} TZS`);
+      //await NotificationService.sendSMS(
+      //  merchant.user.phone,
+     // `💰 ${amount} TZS has been added to your wallet`
+      //);
+ await SMSService.sendRealSMS(merchant.user.phone, `💰 ${amount} TZS added to your wallet from order completion. Total balance: ${wallet.balance} TZS`);
     }
      
 
@@ -139,8 +140,11 @@ console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balanc
     });
     
     if (merchant?.user?.phone) {
-      await NotificationService.sendSMS(
-        merchant.user.phone,
+     // await NotificationService.sendRealSMS(
+      //  merchant.user.phone,
+      //  `💰 ${pendingTransaction.amount} TZS has been added to your //wallet from order ${orderId}`
+     // );
+ await SMSService.sendRealSMS(merchant.user.phone,
         `💰 ${pendingTransaction.amount} TZS has been added to your wallet from order ${orderId}`
       );
     }
@@ -162,7 +166,7 @@ console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balanc
   static async requestWithdrawal(merchantId: string, amount: number, phone: string) {
     const wallet = await this.getOrCreateWallet(merchantId);
     
-    if (wallet.balance < amount) {
+   if (new Decimal(wallet.balance).lessThan(amount)) {
       throw new Error('Insufficient balance');
     }
     
@@ -214,8 +218,11 @@ console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balanc
       });
     } else {
       // Send success notification
-      await NotificationService.sendSMS(
-        withdrawal.wallet.merchant.user.phone,
+      //await NotificationService.sendRealSMS(
+       // withdrawal.wallet.merchant.user.phone,
+       // `✅ Withdrawal of ${withdrawal.amount} TZS has been processed //successfully!`
+    //  );
+await SMSService.sendRealSMS(withdrawal.wallet.merchant.user.phone,
         `✅ Withdrawal of ${withdrawal.amount} TZS has been processed successfully!`
       );
     }

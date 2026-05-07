@@ -1,177 +1,199 @@
 import { prisma } from "../../config/db";
 
 export class ProductService {
-  static async create(userId: string, productData: any)  {
+
+  static async create(userId: string, data: any) {
     const merchant = await prisma.merchant.findUnique({
-      where: { userId },
+      where: { userId }
     });
 
-    if (!merchant) throw new Error("Not a merchant");
+    if (!merchant) throw new Error("Merchant not found");
 
-     // ✅ CRITICAL FIX: Ensure images are saved as JSON string
-  let imagesJson = null;
-  if (productData.images && productData.images.length > 0) {
-    imagesJson = JSON.stringify(productData.images);
-    console.log("Saving images as JSON string, length:", imagesJson.length);
-    console.log("First 100 chars:", imagesJson.substring(0, 100));
+    return prisma.product.create({
+      data: {
+        name: data.name,
+        price: Number(data.price),
+        stock: Number(data.stock),
+        description: data.description || "",
+        category: data.category || "",
+        images: data.images || [],
+        merchantId: merchant.id,
+
+        variants: {
+          create: (data.variants || []).map((v: any) => ({
+            size: v.size,
+            color: v.color,
+            stock: Number(v.stock),
+            price: v.price ? Number(v.price) : null,
+            sku: v.sku
+          }))
+        }
+      },
+      include: {
+        variants: true
+      }
+    });
   }
 
-     const created = await prisma.product.create({
-      data: {
-        name: productData.name,
-        price: productData.price,
-        stock: productData.stock || 0,
-        description: productData.description || "",
-        image: productData.image || (productData.images && productData.images[0]) || "",
-        images: imagesJson,
-        variants: productData.variants || {},
-        category: productData.category,
-        merchantId: merchant.id,
-        isActive: true,  // ✅ Added
+  static async getAll(query?: any) {
+    const page = Number(query?.page || 1);
+    const limit = Number(query?.limit || 50000);
+    const skip = (page - 1) * limit;
+
+    return prisma.product.findMany({
+      where: {
+        isActive: true
       },
-    });
-
-console.log("Created product - images column value:", created.images);
-
-  // ✅ Return with parsed images
-  return {
-    ...created,
-    images: productData.images || []
-  };
-}
-
-   static async getAll() {
-    const products = await prisma.product.findMany({
-      where: { isActive: true },
       include: {
         merchant: {
-          include: {
-            user: {
-              select: { name: true }
-            }
+          select: {
+            businessName: true,
+            rating: true
           }
-        }
-      }
+        },
+        variants: true
+      },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit
     });
-    
-     // ✅ Parse images for each product
-  const parsedProducts = products.map(product => {
-    let parsedImages = [];
-    if (product.images) {
-      try {
-        if (Array.isArray(product.images)) {
-          parsedImages = product.images;
-        } else if (typeof product.images === 'string') {
-          parsedImages = JSON.parse(product.images);
-        }
-      } catch (e) {
-        console.error("Failed to parse images for product:", product.id);
-        parsedImages = [];
-      }
-    }
-    
-    return {
-      ...product,
-      images: parsedImages
-    };
-  });
-  
-  console.log("Products fetched - sample images count:", parsedProducts[0]?.images?.length || 0);
-  
-  return parsedProducts;
-}
+  }
 
   static async getById(productId: string) {
-    const id = typeof productId === 'string' ? productId : String(productId);
+    return prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        merchant: true,
+        variants: true
+      }
+    });
+  }
+
+  static async getMyProducts(userId: string) {
+    const merchant = await prisma.merchant.findUnique({
+      where: { userId }
+    });
+
+    if (!merchant) throw new Error("Merchant not found");
+
+    return prisma.product.findMany({
+      where: {
+        merchantId: merchant.id,
+        isActive: true
+      },
+      include: {
+        variants: true
+      },
+      orderBy: { createdAt: "desc" }
+    });
+  }
+
+  static async update(userId: string, productId: string, data: any) {
+    const merchant = await prisma.merchant.findUnique({
+      where: { userId }
+    });
 
     const product = await prisma.product.findUnique({
-      where: { id: id },
-      include: {
-        merchant: {
-          include: {
-            user: {
-              select: { name: true }
-            }
-          }
-        }
-      }
+      where: { id: productId }
     });
-    
-    if (!product) return null;
-    
-    console.log("Raw product.images from DB:", product.images);
-  console.log("Type of product.images:", typeof product.images);
-  
-  // ✅ Parse images back to array
-  let imagesArray = [];
-  if (product.images) {
-    try {
-      if (typeof product.images === 'string') {
-        imagesArray = JSON.parse(product.images);
-      } else if (Array.isArray(product.images)) {
-        imagesArray = product.images;
-      }
-    } catch (e) {
-      console.error("Failed to parse images:", e);
-    }
-  }
-  
-  console.log("Parsed images array length:", imagesArray.length);
-  
-  return {
-    ...product,
-    images: imagesArray
-  };
-}
 
-  static async update(productId: string, productData: any) {
-     // ✅ Convert images array to JSON string
-  let imagesJson = null;
-  if (productData.images && productData.images.length > 0) {
-    imagesJson = JSON.stringify(productData.images);
-    console.log("UPDATE - Saving images JSON length:", imagesJson.length);
-  } else if (productData.image) {
-    imagesJson = JSON.stringify([productData.image]);
-  }
-    
-   const updated = await prisma.product.update({
-      where: { id: productId },
-      data: {
-        name: productData.name,
-        price: productData.price,
-        stock: productData.stock,
-        description: productData.description,
-        image: productData.image || (productData.images && productData.images[0]) || "",
-        images: imagesJson,  // ✅ Save as JSON string
-        variants: productData.variants || {},
-        category: productData.category,
-      },
+    if (!merchant || !product) throw new Error("Product not found");
+
+    if (product.merchantId !== merchant.id) {
+      throw new Error("Forbidden");
+    }
+
+    await prisma.productVariant.deleteMany({
+      where: { productId }
     });
-    
-     console.log("Updated product - images column value:", updated.images);
-  
-  // Parse back to array for response
-  let parsedImages = [];
-  if (updated.images && typeof updated.images === 'string') {
-    try {
-      parsedImages = JSON.parse(updated.images);
-    } catch(e) {
-      console.error("Failed to parse images:", e);
-    }
-  }
-  
-  return {
-    ...updated,
-    images: parsedImages
-  };
-}
 
-  static async updateStock(productId: string, quantity: number) {
     return prisma.product.update({
       where: { id: productId },
       data: {
-        stock: { decrement: quantity }
+        name: data.name,
+        price: Number(data.price),
+        stock: Number(data.stock),
+        description: data.description,
+        category: data.category,
+        images: data.images,
+
+        variants: {
+          create: (data.variants || []).map((v: any) => ({
+            size: v.size,
+            color: v.color,
+            stock: Number(v.stock),
+            price: v.price ? Number(v.price) : null,
+            sku: v.sku
+          }))
+        }
+      },
+      include: {
+        variants: true
       }
     });
   }
+
+  static async remove(userId: string, productId: string) {
+    const merchant = await prisma.merchant.findUnique({
+      where: { userId }
+    });
+
+    const product = await prisma.product.findUnique({
+      where: { id: productId }
+    });
+
+    if (!merchant || !product) throw new Error("Product not found");
+
+    return prisma.product.update({
+      where: { id: productId },
+      data: { isActive: false }
+    });
+  }
+
+static async toggle(userId: string, productId: string) {
+  const merchant = await prisma.merchant.findUnique({
+    where: { userId }
+  });
+
+  const product = await prisma.product.findUnique({
+    where: { id: productId }
+  });
+
+  if (!merchant || !product) {
+    throw new Error("Product not found");
+  }
+
+  return prisma.product.update({
+    where: { id: productId },
+    data: {
+      isActive: !product.isActive
+    }
+  });
+}
+
+static async updateStock(
+  userId: string,
+  productId: string,
+  stock: number
+) {
+  const merchant = await prisma.merchant.findUnique({
+    where: { userId }
+  });
+
+  const product = await prisma.product.findUnique({
+    where: { id: productId }
+  });
+
+  if (!merchant || !product) {
+    throw new Error("Product not found");
+  }
+
+  return prisma.product.update({
+    where: { id: productId },
+    data: {
+      stock: Number(stock)
+    }
+  });
+}
+
 }

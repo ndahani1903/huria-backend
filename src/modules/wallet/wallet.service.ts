@@ -15,9 +15,18 @@ export class WalletService {
 
     if (!wallet) {
       wallet = await prisma.wallet.create({
-        data: { driverId: driver.id, balance: 0 },
-      });
+  data: {
+    balance: 0,
+    pendingBalance: 0,
+
+    driver: {
+      connect: {
+        id: driver.id
+      }
     }
+  }
+});
+}
 
    return wallet;
   }

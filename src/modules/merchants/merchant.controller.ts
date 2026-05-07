@@ -1,165 +1,35 @@
 import { Request, Response } from 'express';
 import { prisma } from '../../config/db';
+import merchantTierService from './tiers.service';
+import { MERCHANT_TIERS } from './tiers.service';
+import { Decimal } from "@prisma/client/runtime/library";
+
+const toNumber = (v: any) =>
+  v instanceof Decimal ? v.toNumber() : Number(v);
+
 
 export class MerchantController {
-  // Get merchant's own products
-  static async getMyProducts(req: any, res: Response) {
-    try {
-      const merchant = await prisma.merchant.findUnique({
-        where: { userId: req.user.id }
-      });
-      
-      if (!merchant) {
-        return res.status(404).json({ error: "Merchant not found" });
-      }
-      
-      const products = await prisma.product.findMany({
-        where: { 
-          merchantId: merchant.id,
-          isActive: true  // ✅ Only show active products
-        },
-        orderBy: { createdAt: 'desc' }
-      });
-      
-      res.json(products);
-    } catch (error: any) {
-      console.error("Get products error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  }
+   // Get merchant dashboard data
+static async getDashboard(req: Request, res: Response) {
+  const merchantId = req.user!.merchantId;
   
-  // Add new product
-  static async addProduct(req: any, res: Response) {
-    try {
-      const { name, price, stock, image, description } = req.body;
-      
-      const merchant = await prisma.merchant.findUnique({
-        where: { userId: req.user.id }
-      });
-      
-      if (!merchant) {
-        return res.status(404).json({ error: "Merchant not found" });
-      }
-      
-      const product = await prisma.product.create({
-        data: {
-          name,
-          price: parseFloat(price),
-          stock: parseInt(stock) || 0,
-          image: image || null,
-          description: description || null,
-          isActive: true,  // ✅ New products are active
-          merchantId: merchant.id
-        }
-      });
-      
-      res.json(product);
-    } catch (error: any) {
-      console.error("Add product error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  }
+  const [merchant, tierBenefits, upgradeProgress] = await Promise.all([
+    prisma.merchant.findUnique({ where: { id: merchantId } }),
+    merchantTierService.getCurrentBenefits(merchantId),
+    merchantTierService.getUpgradeProgress(merchantId)
+  ]);
   
-  // Update product
-  static async updateProduct(req: any, res: Response) {
-    try {
-      const { id } = req.params;
-      const { name, price, stock, image, description } = req.body;
-      
-      const productId = id;
-
-      const merchant = await prisma.merchant.findUnique({
-        where: { userId: req.user.id }
-      });
-      
-     if (!merchant) {
-      return res.status(404).json({ error: "Merchant not found" });
-    }
-
-      const product = await prisma.product.findFirst({
-        where: { 
-          id: productId,
-          merchantId: merchant?.id,
-          isActive: true  // ✅ Only update active products
-        }
-      });
-      
-      if (!product) {
-        return res.status(404).json({ error: "Product not found" });
-      }
-      
-    // ✅ FIX: Allow updating stock to any value (increase or decrease)
-      const updated = await prisma.product.update({
-        where: { id: productId },
-        data: {
-           name: name !== undefined ? name : product.name,
-          price: price !== undefined ? parseFloat(price) : product.price,
-          stock: stock !== undefined ? parseInt(stock) : product.stock,
-          image: image !== undefined ? image : product.image,
-          description: description !== undefined ? description : product.description
-        }
-      });
-      
-      res.json(updated);
-    } catch (error: any) {
-     console.error("Update product error:", error);
-     res.status(500).json({ error: error.message });
-    }
-  }
+  res.json({
+    merchant,
+    currentTier: merchant?.tier,
+    tierBenefits,
+    upgradeProgress,
+    nextTierCommission: upgradeProgress.nextTier ? 
+      MERCHANT_TIERS[upgradeProgress.nextTier]?.benefits.commissionRate : null
+  });
+}
   
-  // ✅ SOFT DELETE - Just mark as inactive instead of deleting
-  static async deleteProduct(req: any, res: Response) {
-    try {
-      const { id } = req.params;
-      const productId = id;
-
-      console.log(`🗑️  Soft deleting product with ID: ${productId}`);
-
-      const merchant = await prisma.merchant.findUnique({
-        where: { userId: req.user.id }
-      });
-      
-     if (!merchant) {
-        return res.status(404).json({ error: "Merchant not found" });
-      }
-
-      const product = await prisma.product.findFirst({
-        where: { 
-          id: productId,
-          merchantId: merchant?.id,
-          isActive: true  // ✅ Only delete active products
-        }
-      });
-      
-      if (!product) {
-        return res.status(404).json({ error: "Product not found" });
-      }
-      
-      //await prisma.product.delete({
-       // where: { id: productId }
-      //});
-
-       // ✅ SOFT DELETE: Just mark as inactive
-      const updated = await prisma.product.update({
-        where: { id: productId },
-        data: { 
-          isActive: false,
-          stock: 0  // Also set stock to 0
-        }
-      });
-
-      console.log(`✅ Product ${productId} soft deleted (marked as inactive)`);
-      res.json({ 
-         message: "Product deleted successfully", 
-         id: productId,
-        softDelete: true 
-     });
-    } catch (error) {
-      console.error("Delete product error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  }
-  
+    
   // Get merchant's orders
   static async getMyOrders(req: any, res: Response) {
     try {
@@ -173,12 +43,17 @@ export class MerchantController {
       
       const orders = await prisma.order.findMany({
         where: {
-          items: {
-            some: {
-              merchantId: merchant.id
-            }
-          }
-        },
+        OR: [
+          { merchantId: merchant.id },
+          {
+            items: {
+              some: {
+                merchantId: merchant.id
+               }
+             }
+           }
+         ]
+       },
         include: {
           items: {
             where: { merchantId: merchant.id },
@@ -216,14 +91,14 @@ export class MerchantController {
       
       const totalEarnings = orders.reduce((sum, item) => {
         if (item.order.status === 'completed') {
-          return sum + (item.price * item.quantity);
+          return sum + (toNumber(item.price) * item.quantity);
         }
         return sum;
       }, 0);
       
       const pendingEarnings = orders.reduce((sum, item) => {
         if (item.order.status === 'paid' || item.order.status === 'assigned') {
-          return sum + (item.price * item.quantity);
+          return sum + (toNumber(item.price) * item.quantity);
         }
         return sum;
       }, 0);
