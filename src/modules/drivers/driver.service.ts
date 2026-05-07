@@ -139,7 +139,7 @@ static async initDriverAvailability(driverId: string) {
   static async heartbeat(driverId: string, lat: number, lng: number) {
     // Update location with extended expiry
     const key = `driver:${driverId}:location`;
-    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), EX: 60 );
+    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), { EX: 60 } );
     
     // Ensure they're in available set
     await redis.sAdd("drivers:available", driverId);
