@@ -182,7 +182,7 @@ socket.on("driver:location", async (data) => {
        lastLogTime[driverId] = now;
       }
 
-    await redis.setEx(
+    await redis.setex(
       `driver:${driverId}:location`, 60, 
       JSON.stringify({ lat, lng, timestamp: now })
       // 🔥 expires in 60 sec (Use object syntax)
