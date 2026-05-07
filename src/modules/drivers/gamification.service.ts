@@ -1,8 +1,7 @@
 import { prisma } from "../../config/db";
-import { Redis } from 'ioredis';
+import redis from "../../config/redis";
 import { Decimal } from "@prisma/client/runtime/library";
 
-const redis = new Redis();
 
 interface DriverStats {
   deliveriesToday: number;

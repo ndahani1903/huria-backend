@@ -2,7 +2,7 @@ import { prisma } from '../../config/db';
 import { io } from "../../server"; 
 import { calculateDistance } from '../../utils/distance';
 import { DriverService } from '../drivers/driver.service';
-import { redis } from "../../config/redis";
+import redis from "../../config/redis";
 import { NotificationService } from '../notifications/notification.service';
 import { MapsService } from "../../services/maps.service";
 import { WalletService } from "../wallet/wallet.service";

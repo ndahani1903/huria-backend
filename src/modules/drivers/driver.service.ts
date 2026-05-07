@@ -1,5 +1,5 @@
 import { prisma } from '../../config/db';
-import { redis } from "../../config/redis";
+import redis from "../../config/redis";
 import { io } from "../../server";
 import driverGamificationService from '../drivers/gamification.service';
 

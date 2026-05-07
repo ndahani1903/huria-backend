@@ -1,7 +1,5 @@
 import { prisma } from '../../config/db';
-import { Redis } from 'ioredis';
-
-const redis = new Redis();
+import redis from "../../config/redis";
 
 interface InventoryReservation {
   id: string;

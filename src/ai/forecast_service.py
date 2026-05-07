@@ -19,12 +19,12 @@ app = Flask(__name__)
 
 class DemandForecastService:
     def __init__(self):
-        self.redis_client = redis.Redis(
-            host=os.getenv('REDIS_HOST', 'localhost'),
-            port=int(os.getenv('REDIS_PORT', 6379)),
-            decode_responses=True,
-            password=os.getenv('REDIS_PASSWORD', None)
-        )
+redis_url = os.getenv("REDIS_URL")
+
+        self.redis_client = redis.from_url(
+    redis_url,
+    decode_responses=True
+)
         
         # PostgreSQL connection
         database_url = os.getenv('DATABASE_URL', 'postgresql://user:pass@localhost:5432/huria')

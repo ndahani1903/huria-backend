@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from "../../middleware/auth.middleware";
 import { DriverService } from './driver.service';
 import { prisma } from "../../config/db";
-import { redis } from "../../config/redis";
+import redis from "../../config/redis";
 
 export class DriverController {
 /* //we ommit cause it is not used

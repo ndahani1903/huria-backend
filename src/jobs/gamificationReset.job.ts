@@ -1,7 +1,5 @@
 import cron from 'node-cron';
-import { Redis } from 'ioredis';
-
-const redis = new Redis();
+import redis from '../config/redis';
 
 // Reset daily leaderboard at midnight
 cron.schedule('0 0 * * *', async () => {

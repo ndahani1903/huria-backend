@@ -1,4 +1,5 @@
 import redis from '../config/redis';
+import Redis from "ioredis";
 import crypto from 'crypto';
 
 interface CacheOptions {

@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { prisma } from "../../config/db";
-import { redis } from "../../config/redis";
+import redis from "../../config/redis";
 import { Role } from "@prisma/client";
 import { normalizeTZPhone  } from "../../utils/phone";
 import {

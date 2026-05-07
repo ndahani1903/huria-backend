@@ -1,14 +1,12 @@
 import { Redis } from 'ioredis';
 import { Request, Response, NextFunction } from 'express';
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
+const redis = new Redis(process.env.REDIS_URL!, {
+  maxRetriesPerRequest: null,
   enableOfflineQueue: false,
   retryStrategy: (times) => {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  }
+    return Math.min(times * 50, 2000);
+  },
 });
 
 interface RateLimitConfig {
