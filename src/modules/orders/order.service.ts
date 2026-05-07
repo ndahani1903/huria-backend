@@ -793,7 +793,7 @@ const drivers = await prisma.driver.findMany();
 */
 
  // Get available drivers from Redis (convert Buffer to string):
- const driverIdsRaw = await redis.sMembers("drivers:available");
+ const driverIdsRaw = await redis.smembers("drivers:available");
 
   //Convert Set to array if needed, and ensure strings
    let driverIds: string[];

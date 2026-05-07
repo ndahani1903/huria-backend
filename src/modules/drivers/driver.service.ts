@@ -49,7 +49,7 @@ static async acceptOrder(orderId: string, driverId: string) {
 
   // ADD THIS METHOD to DriverService class:
 static async initDriverAvailability(driverId: string) {
-  await redis.sAdd("drivers:available", driverId);
+  await redis.sadd("drivers:available", driverId);
 }
 
   // ✅ GET AVAILABLE DRIVERS
@@ -65,14 +65,14 @@ static async initDriverAvailability(driverId: string) {
       data: { status: "busy" },
     });
 
-    await redis.sRem("drivers:available", driverId);
+    await redis.srem("drivers:available", driverId);
   }
 
    // ✅ MARK DRIVER AVAILABLE
   static async markAvailable(driverId: string) {
   try {
      // 🔥Add back to Redis available set
-  await redis.sAdd("drivers:available", driverId);
+  await redis.sadd("drivers:available", driverId);
 
      // Update database
     await prisma.driver.update({
@@ -102,7 +102,7 @@ static async initDriverAvailability(driverId: string) {
     // ✅ GO OFFLINE (manual)
   static async goOffline(driverId: string) {
       // Remove from Redis
-    await redis.sRem("drivers:available", driverId);
+    await redis.srem("drivers:available", driverId);
 
     // Update database
     await prisma.driver.update({
@@ -122,7 +122,7 @@ static async initDriverAvailability(driverId: string) {
   // ✅ GO ONLINE
   static async goOnline(driverId: string) {
    // Add to Redis
-    await redis.sAdd("drivers:available", driverId);
+    await redis.sadd("drivers:available", driverId);
 
     // Update database
     await prisma.driver.update({
@@ -139,7 +139,7 @@ static async initDriverAvailability(driverId: string) {
   static async heartbeat(driverId: string, lat: number, lng: number) {
     // Update location with extended expiry
     const key = `driver:${driverId}:location`;
-    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), { EX: 60 });
+    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), EX: 60 );
     
     // Ensure they're in available set
     await redis.sAdd("drivers:available", driverId);

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { prisma } from '../config/db';
-import { redis } from '../config/redis';
+import redis from '../config/redis';
 
 const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:5001';
 

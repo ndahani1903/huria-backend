@@ -99,7 +99,7 @@ export class AuthService {
 
       driverId = driver.id;
 
-      await redis.sAdd("drivers:available", driver.id);
+      await redis.sadd("drivers:available", driver.id);
     }
 
    const accessToken = signAccessToken({
@@ -172,7 +172,7 @@ export class AuthService {
       driverId = driver?.id || null;
 
       if (driverId) {
-        await redis.sAdd("drivers:available", driverId);
+        await redis.sadd("drivers:available", driverId);
       }
     }
 

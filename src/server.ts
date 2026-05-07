@@ -1,4 +1,4 @@
-import { redis } from "./config/redis";
+import redis from "./config/redis";
 import dotenv from "dotenv";
 dotenv.config();
 
