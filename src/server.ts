@@ -185,7 +185,7 @@ socket.on("driver:location", async (data) => {
     await redis.set(
       `driver:${driverId}:location`,
       JSON.stringify({ lat, lng, timestamp: now }),
-      { EX: 60 } // 🔥 expires in 60 sec (Use object syntax)
+      { EX: 60, } // 🔥 expires in 60 sec (Use object syntax)
     );
 
  const last = socketRate.get(socket.id) || 0;
@@ -229,7 +229,7 @@ setInterval(async () => {
 
 // 💓 HEARTBEAT MONITOR (optional - log stale drivers)
 setInterval(async () => {
-  const driversRaw = await redis.sMembers("drivers:available");
+  const driversRaw = await redis.smembers("drivers:available");
   let drivers: string[];
   if (driversRaw instanceof Set) {
     drivers = Array.from(driversRaw).map(id => id.toString());

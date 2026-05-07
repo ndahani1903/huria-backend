@@ -139,13 +139,13 @@ static async initDriverAvailability(driverId: string) {
   static async heartbeat(driverId: string, lat: number, lng: number) {
     // Update location with extended expiry
     const key = `driver:${driverId}:location`;
-    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), { EX: 60 } );
+    await redis.set(key, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }), { EX: 60, } );
     
     // Ensure they're in available set
     await redis.sAdd("drivers:available", driverId);
     
     // Update last seen timestamp
-    await redis.set(`driver:${driverId}:lastSeen`, Date.now().toString(), { EX: 70 });
+    await redis.set(`driver:${driverId}:lastSeen`, Date.now().toString(), { EX: 70, });
     
     return { success: true };
   }
@@ -245,7 +245,7 @@ static async initDriverAvailability(driverId: string) {
   static async updateLocation(driverId: string, lat: number, lng: number) {
     const key = `driver:${driverId}:location`;
     await redis.set(key, JSON.stringify({ lat, lng, timestamp: Date.now() }),
-     { EX: 60 }  // ✅ Fixed: Use object syntax instead of 4 arguments
+     { EX: 60, }  // ✅ Fixed: Use object syntax instead of 4 arguments
     );
     console.log(`📍 Driver ${driverId} location updated`);
 
