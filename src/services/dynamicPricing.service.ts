@@ -1,7 +1,5 @@
-import { Redis } from 'ioredis';
+import redis from '../config/redis';
 import { prisma } from "../config/db";
-
-const redis = new Redis();
 
 interface PricingFactors {
   basePrice: number;

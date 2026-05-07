@@ -1,34 +1,25 @@
-import { createClient } from "redis";
+import Redis from "ioredis";
 
-const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const redisUrl = process.env.REDIS_URL;
 
+const redis = redisUrl
+  ? new Redis(redisUrl)
+  : null;
 
-export const redis = createClient({
-  url: redisUrl,
-});
+if (redis) {
+  redis.on("connect", () => {
+    console.log("🟢 Redis connected");
+  });
 
-redis.on('error', (err) => console.error('Redis Client Error:', err));
-redis.on('connect', () => console.log('🟢 Redis connected'));
-redis.on('ready', () => console.log('✅ Redis client ready'));
+  redis.on("ready", () => {
+    console.log("✅ Redis ready");
+  });
 
-// Auto-connect when the module loads
-(async () => {
-  if (!redis.isOpen) {
-    await redis.connect();
-    console.log('🔌 Redis client connected successfully');
-  }
-})();
-
-// ✅ Connect when the app is ready
-// Export a function to ensure connection is ready
-(async function initRedis() {
-  try {
-    if (!redis.isOpen) {
-      await redis.connect();
-    }
-  } catch (err) {
-    console.error('Redis connection failed:', err);
-  }
-})();
+  redis.on("error", (err) => {
+    console.error("❌ Redis error:", err.message);
+  });
+} else {
+  console.warn("⚠️ REDIS_URL missing. Redis disabled.");
+}
 
 export default redis;

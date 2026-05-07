@@ -1,4 +1,4 @@
-import { Redis } from 'ioredis';
+import redis from '../config/redis';
 import crypto from 'crypto';
 
 interface CacheOptions {
@@ -9,7 +9,7 @@ interface CacheOptions {
 }
 
 class CacheService {
-  private redis: Redis;
+  private redis: Redis | null;
   private readonly DEFAULT_TTL = 300; // 5 minutes
   private readonly COMPRESSION_THRESHOLD = 1024; // 1KB
   private cacheStats = {
@@ -20,23 +20,15 @@ class CacheService {
   };
   
   constructor() {
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST,
-      port: parseInt(process.env.REDIS_PORT),
-      password: process.env.REDIS_PASSWORD,
-      enableOfflineQueue: true,
-      maxRetriesPerRequest: 3,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      }
-    });
-    
-    this.setupEvictionMonitoring();
-  }
+  this.redis = redis;
+
+  this.setupEvictionMonitoring();
+}
   
   async get<T>(key: string): Promise<T | null> {
     try {
+     if (!this.redis) return null;
+
       const data = await this.redis.get(key);
       
       if (!data) {

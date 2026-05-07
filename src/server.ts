@@ -38,18 +38,6 @@ import reviewRoutes from './modules/reviews/review.routes';
 import notificationSettingsRoutes from './modules/notifications/notificationSettings.routes';
 import testNotificationRoutes from './modules/notifications/testNotification.routes';
 
-// Ensure Redis is connected
-(async () => {
-  try {
-    if (!redis.isOpen) {
-      await redis.connect();
-      console.log('✅ Main Redis client connected');
-    }
-  } catch (err) {
-    console.error('Failed to connect Redis:', err);
-  }
-})();
-
 const httpServer = http.createServer(app);
 const lastLogTime: Record<string, number> = {};
 
@@ -83,16 +71,27 @@ export const io = new Server(httpServer, {
   }
 });
 
-const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const redisUrl = process.env.REDIS_URL;
 
-const pubClient = createClient({ url: redisUrl });
-const subClient = pubClient.duplicate();
+let pubClient: any;
+let subClient: any;
+
+if (redisUrl) {
+  pubClient = createClient({ url: redisUrl });
+  subClient = pubClient.duplicate();
+}
 
 async function initSocketRedis() {
   try {
-    await pubClient.connect();
-    await subClient.connect();
-    io.adapter(createAdapter(pubClient, subClient));
+    if (!pubClient || !subClient) {
+  console.log("⚠️ REDIS_URL missing. Using memory adapter.");
+  return;
+}
+
+await pubClient.connect();
+await subClient.connect();
+
+io.adapter(createAdapter(pubClient, subClient));
     console.log("✅ Socket.IO Redis adapter connected");
   } catch (error) {
     console.error("❌ Redis connection failed:", error);

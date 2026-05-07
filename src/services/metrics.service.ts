@@ -1,9 +1,8 @@
-import { Redis } from 'ioredis';
+import redis from '../config/redis';
 import { PrismaClient } from '@prisma/client';
 import { Decimal } from "@prisma/client/runtime/library";
 
 const prisma = new PrismaClient();
-const redis = new Redis();
 
 export const toNumber = (val: any): number => {
   if (!val) return 0;
