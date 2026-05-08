@@ -2,12 +2,9 @@ import { prisma } from '../../config/db';
 import { OrderService } from "../orders/order.service";
 import { io } from "../../server";
 import { SMSService } from '../../services/sms.service';
-import { Redis } from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import { Decimal } from "@prisma/client/runtime/library";
-
-const redis = new Redis();
-
+import redis from "../../config/redis";
 
 export const toNumber = (val: any): number => {
   if (!val) return 0;
