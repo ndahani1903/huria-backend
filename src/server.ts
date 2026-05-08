@@ -71,14 +71,21 @@ export const io = new Server(httpServer, {
   }
 });
 
-const redisUrl = process.env.REDIS_URL;
-
 let pubClient: any;
 let subClient: any;
 
-if (redisUrl) {
-  pubClient = createClient({ url: redisUrl });
-  subClient = pubClient.duplicate();
+if (redis) {
+  // Use your existing ioredis client as the pub client
+  pubClient = redis;
+  // Create a duplicate with the same config for subscription
+  subClient = redis.duplicate();
+  
+  // Ensure the duplicate also has family: 0
+  if (subClient.options) {
+    subClient.options.family = 0;
+  }
+} else {
+  console.log("⚠️ Redis client not available. Using memory adapter.");
 }
 
 async function initSocketRedis() {
@@ -88,8 +95,9 @@ async function initSocketRedis() {
   return;
 }
 
-await pubClient.connect();
-await subClient.connect();
+// For ioredis, we don't call connect() - it connects automatically
+    // Just wait a moment for connection to be ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
 io.adapter(createAdapter(pubClient, subClient));
     console.log("✅ Socket.IO Redis adapter connected");
@@ -100,6 +108,8 @@ io.adapter(createAdapter(pubClient, subClient));
   }
 }
 
+initSocketRedis();
+
 function verifyToken(token: string): any {
   try {
     return jwt.verify(token, process.env.JWT_SECRET!);
@@ -108,7 +118,6 @@ function verifyToken(token: string): any {
   }
 }
 
-initSocketRedis();
 
 io.on("connection", socket => {
  console.log("Client connected:", socket.id);
