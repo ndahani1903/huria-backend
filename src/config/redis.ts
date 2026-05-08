@@ -3,7 +3,19 @@ import Redis from "ioredis";
 const redisUrl = process.env.REDIS_URL;
 
 const redis = redisUrl
-  ? new Redis(redisUrl)
+  ? new Redis(redisUrl, {
+      family: 0, // This is the key fix for Railway's IPv6
+      retryStrategy: (times) => {
+        // Prevent infinite retries and backoff
+        if (times > 10) {
+          console.error(`Redis retry attempts exceeded (${times}), stopping`);
+          return null; // Stop retrying after 10 attempts
+        }
+        return Math.min(times * 100, 3000);
+      },
+      maxRetriesPerRequest: 3,
+      connectTimeout: 10000, // 10 second timeout
+    })
   : null;
 
 if (redis) {
