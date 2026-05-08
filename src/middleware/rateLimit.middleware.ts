@@ -1,13 +1,5 @@
-import { Redis } from 'ioredis';
 import { Request, Response, NextFunction } from 'express';
-
-const redis = new Redis(process.env.REDIS_URL!, {
-  maxRetriesPerRequest: null,
-  enableOfflineQueue: false,
-  retryStrategy: (times) => {
-    return Math.min(times * 50, 2000);
-  },
-});
+import redis from '../config/redis'; 
 
 interface RateLimitConfig {
   windowMs: number;
@@ -151,6 +143,12 @@ const rateLimiter = new RateLimiter();
 // Express middleware factory
 export const rateLimitMiddleware = (limitType: string = 'default') => {
   return async (req: Request, res: Response, next: NextFunction) => {
+    // Check if redis is available
+    if (!redis) {
+      console.warn('⚠️ Redis not available, skipping rate limit');
+      return next();
+    }
+    
     // Get client identifier
     const identifier = req.user?.id || req.ip || req.headers['x-forwarded-for'] || 'unknown';
     const identifierStr = Array.isArray(identifier) ? identifier[0] : identifier;

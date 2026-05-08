@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { Redis } from 'ioredis';
 import { createClient } from 'redis';
+import configuredRedis from '../config/redis';
 
 export class WebSocketManager {
   private io: Server;
@@ -17,16 +18,31 @@ export class WebSocketManager {
   }
   
   private initializeRedis() {
-    this.pubClient = new Redis({
-      host: process.env.REDIS_HOST,
-      port: parseInt(process.env.REDIS_PORT),
+     // Use the same Redis URL as your configured client
+    const redisUrl = process.env.REDIS_URL;
+    
+    if (!redisUrl) {
+      throw new Error('REDIS_URL not configured');
+    }
+    
+    // Create Redis clients with proper IPv6 support
+    this.pubClient = new Redis(redisUrl, {
+      family: 0, // KEY FIX: Enable both IPv4 and IPv6
       retryStrategy: (times) => {
         const delay = Math.min(times * 50, 2000);
         return delay;
-      }
+      },
+      maxRetriesPerRequest: 3,
+      connectTimeout: 10000,
+      lazyConnect: true // Don't connect immediately
     });
     
     this.subClient = this.pubClient.duplicate();
+    
+    // Connect manually
+    this.pubClient.connect().catch(err => {
+      console.error('WebSocketManager Redis connection error:', err.message);
+    });
   }
   
   private initializeSocket(server: any) {

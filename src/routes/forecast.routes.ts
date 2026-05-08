@@ -1,11 +1,9 @@
-import Redis from 'ioredis';
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role.middleware';
 import ForecastService from '../services/forecast.service';
 import { prisma } from '../config/db';
-
-export const redis = new Redis();
+import redis from '../config/redis'; 
 
 const router = Router();
 
@@ -129,10 +127,22 @@ router.get('/admin/status',
   authMiddleware, 
   requireRole('admin'), 
   async (req, res) => {
+     // Check if redis is available
+    if (!redis) {
+      return res.json({
+        status: 'redis_not_available',
+        last_run: null,
+        merchants_processed: null
+      });
+    }
+    
+    const lastRun = await redis.get('forecast:last_run');
+    const lastCount = await redis.get('forecast:last_count');
+
     res.json({
       status: 'running',
-      last_run: await redis.get('forecast:last_run'),
-      merchants_processed: await redis.get('forecast:last_count')
+      last_run: lastRun,
+      merchants_processed: lastCount
     });
   }
 );
