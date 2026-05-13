@@ -115,6 +115,8 @@ model Driver {
   userId          String    @unique
   name            String
   phone           String    @unique
+  licenseNumber   String    @unique
+  nidaNumber      String    @unique
   status          String    @default("offline")
   vehicleType     String?
   vehiclePlate    String?
@@ -131,12 +133,13 @@ model Driver {
   updatedAt       DateTime  @updatedAt
 
   // Relations
-  user         User                @relation(fields: [userId], references: [id])
-  wallet       Wallet?
-  withdrawals  Withdrawal[]
-  orders       Order[]
-  advances     DriverAdvance[]
-  achievements DriverAchievement[]
+  user          User                @relation(fields: [userId], references: [id])
+  wallet        Wallet?
+  withdrawals   Withdrawal[]
+  orders        Order[]
+  advances      DriverAdvance[]
+  achievements  DriverAchievement[]
+  DriverMission DriverMission[]
 
   @@index([status])
   @@index([isActive, currentLat, currentLng])
@@ -773,4 +776,27 @@ model Review {
   @@index([userId])
   @@index([rating])
   @@index([createdAt])
+}
+
+model PendingRegistration {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  data      Json
+  role      String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model DriverMission {
+  id String @id @default(cuid())
+
+  driverId  String
+  missionId String
+  reward    Float
+
+  createdAt DateTime @default(now())
+
+  driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@unique([driverId, missionId])
 }

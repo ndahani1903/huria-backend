@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { AuthController } from "./auth.controller";
+import {
+  AuthController,
+  startRegistration,
+  completeRegistration
+} from "./auth.controller";
 import { 
   rateLimitMiddleware, 
   authRateLimiter, 
@@ -29,5 +33,10 @@ router.post("/verify-email", rateLimitMiddleware, AuthController.verifyEmail);
 
 /*router.post("/resend-verification", authRateLimiter, AuthController.resendVerification);
   */
+
+router.post("/start-registration", startRegistration);
+router.post("/complete-registration", completeRegistration);
+
+
 
 export default router;

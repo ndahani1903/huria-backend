@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Warranty Policy - Huria Delivery</title>
+
+  <style>
+    *{
+      margin:0;
+      padding:0;
+      box-sizing:border-box;
+    }
+
+    body{
+      font-family: Arial, Helvetica, sans-serif;
+      background:#f4f7fb;
+      color:#222;
+      line-height:1.7;
+      padding:40px 20px;
+    }
+
+    .container{
+      max-width:1100px;
+      margin:auto;
+      background:#fff;
+      border-radius:18px;
+      padding:40px;
+      box-shadow:0 10px 35px rgba(0,0,0,0.08);
+    }
+
+    h1{
+      color:#0A6E72;
+      margin-bottom:10px;
+      font-size:38px;
+    }
+
+    h2{
+      margin-top:40px;
+      margin-bottom:18px;
+      color:#0A6E72;
+      border-left:6px solid #0A6E72;
+      padding-left:12px;
+      font-size:28px;
+    }
+
+    h3{
+      margin-top:25px;
+      margin-bottom:12px;
+      color:#1f2937;
+      font-size:22px;
+    }
+
+    p{
+      margin-bottom:16px;
+    }
+
+    ul{
+      margin-left:20px;
+      margin-bottom:20px;
+    }
+
+    li{
+      margin-bottom:10px;
+    }
+
+    .intro{
+      background:#f0fdfa;
+      border-left:5px solid #0A6E72;
+      padding:20px;
+      border-radius:10px;
+      margin:25px 0;
+    }
+
+    .info-box{
+      background:#f9fafb;
+      padding:18px;
+      border-radius:12px;
+      margin:20px 0;
+      border:1px solid #e5e7eb;
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin:25px 0;
+      overflow:hidden;
+      border-radius:12px;
+    }
+
+    th{
+      background:#0A6E72;
+      color:white;
+      text-align:left;
+      padding:14px;
+      font-size:15px;
+    }
+
+    td{
+      padding:14px;
+      border:1px solid #e5e7eb;
+      vertical-align:top;
+    }
+
+    tr:nth-child(even){
+      background:#f9fafb;
+    }
+
+    .footer-note{
+      margin-top:40px;
+      padding:20px;
+      background:#f0fdfa;
+      border-radius:12px;
+      font-weight:bold;
+      text-align:center;
+    }
+
+    .updated{
+      margin-top:30px;
+      text-align:right;
+      color:#6b7280;
+      font-size:14px;
+    }
+
+    a{
+      color:#0A6E72;
+      text-decoration:none;
+      font-weight:600;
+    }
+
+    @media(max-width:768px){
+      .container{
+        padding:20px;
+      }
+
+      h1{
+        font-size:28px;
+      }
+
+      h2{
+        font-size:22px;
+      }
+
+      table{
+        display:block;
+        overflow-x:auto;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <h1>WARRANTY POLICY - HURIA DELIVERY</h1>
+
+  <h2>1. Warranty Coverage</h2>
+
+  <p> Huria Delivery offers warranty protection on eligible products. </p>
+   
+  <h2>2. Standard Warranty</h2>
+
+    <ul>
+      <li>Electronics: 1 year</li>
+      <li>Appliances: 6 months</li>
+      <li>Accessories: 3 months</li>
+    </ul>
+   
+  <h2>3. What's Covered</h2>
+
+    <ul>
+      <li>Manufacturing defects</li>
+      <li>Hardware malfunctions</li>
+      <li>Battery issues (within 6 months)</li>
+    </ul>
+
+  <h2>4. What's Not Covered</h2>
+
+    <ul>
+      <li>Accidental damage</li>
+      <li>Water damage</li>
+      <li>Normal wear and tear</li>
+      <li>Unauthorized repairs</li>
+    </ul>
+
+  <h2>5. How to Claim</h2>
+
+    <ul>
+      <li>Contact support within warranty period</li>
+      <li>Provide proof of purchase</li>
+      <li>Return the product for inspection</li>
+      <li>Replacement or repair within 14 days</li>
+    </ul>
+
+  <div class="updated">
+    Last Updated: <span id="footerDate"></span>
+  </div>
+
+</div>
+
+<script>
+  const today = new Date();
+
+  const formatted =
+    String(today.getDate()).padStart(2, '0') + '-' +
+    String(today.getMonth() + 1).padStart(2, '0') + '-' +
+    today.getFullYear();
+
+  document.getElementById('currentDate').textContent = formatted;
+  document.getElementById('footerDate').textContent = formatted;
+</script>
+
+</body>
+</html>

@@ -35,6 +35,7 @@ import coPilotRoutes from './routes/copilot.routes';
 import addressRoutes from './routes/address.routes';
 import userRoutes from "./modules/users/user.routes";
 import reviewRoutes from './modules/reviews/review.routes';
+import signatureRoutes from './routes/signature.routes';
 import notificationSettingsRoutes from './modules/notifications/notificationSettings.routes';
 import testNotificationRoutes from './modules/notifications/testNotification.routes';
 
@@ -64,6 +65,7 @@ app.use("/api/users", userRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/users', notificationSettingsRoutes);
 app.use('/api/test', testNotificationRoutes);
+app.use('/api/signatures', signatureRoutes);
 
 export const io = new Server(httpServer, {
   cors: {

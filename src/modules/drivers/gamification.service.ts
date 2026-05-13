@@ -7,9 +7,18 @@ interface DriverStats {
   deliveriesToday: number;
   deliveriesThisWeek: number;
   deliveriesThisMonth: number;
+
   rating: number;
   streak: number;
   earnings: number;
+
+  acceptanceRate: number;
+  completionRate: number;
+  onTimeRate: number;
+
+  xp: number;
+  level: string;
+  totalPoints: number;
 }
 
 interface Achievement {
@@ -35,7 +44,7 @@ export const ACHIEVEMENTS: Record<string, Achievement> = {
 
 export class DriverGamificationService {
   private readonly STREAK_BONUSES: Record<string, number> = {
-    '7': 50000,   // TSh 50,000 for 7-day streak
+    '7': 50000,   // TSh 50,000 for 7-day streak or 2L fuel
     '30': 250000, // TSh 250,000 for 30-day streak
     '90': 1000000 // TSh 1,000,000 for 90-day streak
   };
@@ -46,10 +55,74 @@ export class DriverGamificationService {
     '4.7': 25000
   };
 
+private calculateXP(stats: DriverStats): number {
+  return (
+    (stats.deliveriesThisMonth * 10) +
+    (stats.rating * 20) +
+    (stats.streak * 15) +
+    (stats.onTimeRate * 5)
+  );
+}
+
+private getDriverLevel(xp: number): string {
+  if (xp >= 5000) return 'Platinum';
+  if (xp >= 2500) return 'Gold';
+  if (xp >= 1000) return 'Silver';
+  return 'Bronze';
+}
+
+private DAILY_MISSIONS = [
+  {
+    id: 'daily_5',
+    title: 'Complete 5 deliveries',
+    reward: 10000,
+    target: 5
+  },
+  {
+    id: 'daily_10',
+    title: 'Complete 10 deliveries',
+    reward: 25000,
+    target: 10
+  }
+];
+
+private getTierBenefits(level: string) {
+  switch(level) {
+    case 'Platinum':
+      return {
+        priorityOrders: true,
+        bonusMultiplier: 2,
+        badge: '💎'
+      };
+
+    case 'Gold':
+      return {
+        priorityOrders: true,
+        bonusMultiplier: 1.5,
+        badge: '🥇'
+      };
+
+    case 'Silver':
+      return {
+        priorityOrders: false,
+        bonusMultiplier: 1.2,
+        badge: '🥈'
+      };
+
+    default:
+      return {
+        priorityOrders: false,
+        bonusMultiplier: 1,
+        badge: '🥉'
+      };
+  }
+}
+
   async updateDriverStats(driverId: string, deliveryId: string): Promise<void> {
     const stats = await this.getDriverStats(driverId);
     const achievements = await this.checkAchievements(driverId, stats);
-    
+    await this.checkDailyMissions(driverId, stats);
+
     // Update streak
     const streak = await this.updateStreak(driverId);
     
@@ -64,6 +137,38 @@ export class DriverGamificationService {
     // Update leaderboard
     await this.updateLeaderboard(driverId, stats);
   }
+
+async checkDailyMissions(driverId: string, stats: DriverStats) {
+  for (const mission of this.DAILY_MISSIONS) {
+    if (stats.deliveriesToday >= mission.target) {
+
+      const existing = await prisma.driverMission.findFirst({
+        where: {
+          driverId,
+          missionId: mission.id
+        }
+      });
+
+      if (!existing) {
+
+        await prisma.driverMission.create({
+          data: {
+            driverId,
+            missionId: mission.id,
+            reward: mission.reward
+          }
+        });
+
+        await this.addBonus(
+          driverId,
+          mission.reward,
+          `Mission completed: ${mission.title}`
+        );
+      }
+    }
+  }
+}
+
 
   async getLeaderboard(period: 'daily' | 'weekly' | 'monthly'): Promise<any[]> {
     const key = `leaderboard:${period}`;
@@ -268,7 +373,12 @@ const newBalance = toNumber(currentWallet?.balance || 0) + amount;
 
   private async updateLeaderboard(driverId: string, stats: DriverStats): Promise<void> {
     // Calculate score: deliveries * 10 + rating * 20
-    const score = (stats.deliveriesToday * 10) + (stats.rating * 20);
+    const score =
+  (stats.deliveriesToday * 40) +
+  (stats.rating * 25) +
+  (stats.streak * 15) +
+  (stats.onTimeRate * 10) +
+  (stats.acceptanceRate * 10);
     
     await Promise.all([
       redis.zadd('leaderboard:daily', score, driverId),
@@ -301,6 +411,22 @@ const newBalance = toNumber(currentWallet?.balance || 0) + amount;
     ]);
     
     const streak = await redis.get(`streak:${driverId}`);
+  const xp = this.calculateXP({
+  deliveriesToday,
+  deliveriesThisWeek: deliveriesWeek,
+  deliveriesThisMonth: deliveriesMonth,
+  rating: driver?.rating || 5,
+  streak: streak ? parseInt(streak) : 0,
+  earnings: toNumber(earnings._sum.driverEarning || 0),
+  acceptanceRate: 95,
+  completionRate: 98,
+  onTimeRate: 90,
+  xp: 0,
+  level: '',
+  totalPoints: 0
+});
+
+const level = this.getDriverLevel(xp);
     
     return {
       deliveriesToday,
@@ -308,8 +434,16 @@ const newBalance = toNumber(currentWallet?.balance || 0) + amount;
       deliveriesThisMonth: deliveriesMonth,
       rating: driver?.rating || 5.0,
       streak: streak ? parseInt(streak) : 0,
-      earnings: toNumber(earnings._sum.driverEarning || 0)
-    };
+      earnings: toNumber(earnings._sum.driverEarning || 0),
+
+  acceptanceRate: 95,
+  completionRate: 98,
+  onTimeRate: 90,
+
+  xp,
+  level,
+  totalPoints: xp
+};
   }
 
   private async getDriverAchievements(driverId: string): Promise<string[]> {

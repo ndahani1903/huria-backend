@@ -117,9 +117,16 @@ router.get('/gamification/leaderboard/:period',
             where: { id: entry.driverId },
             include: { user: { select: { name: true } } }
           });
+
+     const stats = await driverGamificationService.getDriverStats(entry.driverId);
+
           return {
             ...entry,
-            name: driver?.user?.name || 'Unknown Driver'
+            name: driver?.user?.name || 'Unknown Driver',
+            rating: stats.rating,
+            streak: stats.streak,
+            level: stats.level,
+            deliveriesToday: stats.deliveriesToday
           };
         })
       );

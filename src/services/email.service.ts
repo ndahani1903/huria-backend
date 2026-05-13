@@ -1,4 +1,7 @@
 import transporter from '../config/email';
+import fs from 'fs';
+import path from 'path';
+//import puppeteer from 'puppeteer';
 
 export class EmailService {
   // Send real email
@@ -18,6 +21,82 @@ export class EmailService {
       throw error;
     }
   }
+
+/*static async sendSignedAgreementEmail(email: string, name: string, role: string, signatureBase64: string) {
+    // Generate PDF of signed agreement
+  const pdfBuffer = await generateAgreementPDF(role, name, signatureBase64);
+
+   await transporter.sendMail({
+    from: `"Huria Delivery" <${process.env.SMTP_FROM}>`,
+    to: email,
+    subject: `Your Signed ${role === 'merchant' ? 'Merchant' : 'Driver'} Agreement - Huria Delivery`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px;">
+        <h2>Welcome to Huria Delivery, ${name}!</h2>
+        <p>Thank you for signing your ${role === 'merchant' ? 'Merchant' : 'Driver'} Agreement.</p>
+        <p>Please find attached your signed agreement for your records.</p>
+        <div style="margin: 20px 0; padding: 15px; background: #f5f5f5;">
+          <p><strong>What's next?</strong></p>
+          <p>${role === 'merchant' 
+            ? 'Start adding products and accepting orders!' 
+            : 'You can now start accepting delivery requests!'}</p>
+        </div>
+        <p>Best regards,<br/>Huria Delivery Team</p>
+      </div>
+    `,
+    attachments: [{
+      filename: `Huria_${role}_Agreement_Signed.pdf`,
+      content: pdfBuffer,
+      contentType: 'application/pdf'
+    }]
+  });
+}
+
+  static async generateAgreementPDF(role: string, name: string, signatureBase64: string): Promise<Buffer> {
+    const browser = await puppeteer.launch();
+  const page = await browser.newPage();
+  
+  // Load the agreement markdown file
+  const agreementPath = path.join(__dirname, `../legal/${role.toUpperCase()}_AGREEMENT.md`);
+  const agreementContent = fs.readFileSync(agreementPath, 'utf-8');
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 40px; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .signature-section { margin-top: 50px; border-top: 1px solid #ccc; padding-top: 20px; }
+        .signature-image { max-width: 200px; margin-top: 10px; }
+        .date { margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>${role.toUpperCase()} AGREEMENT</h1>
+        <p>Huria Delivery Platform</p>
+      </div>
+      <div class="content">
+        ${marked.parse(agreementContent)}
+      </div>
+      <div class="signature-section">
+        <p><strong>Signed by:</strong> ${name}</p>
+        <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+        <p><strong>Signature:</strong></p>
+        <img src="${signatureBase64}" class="signature-image" />
+      </div>
+    </body>
+    </html>
+  `;
+  
+  await page.setContent(html);
+  const pdf = await page.pdf({ format: 'A4' });
+  await browser.close();
+  
+  return pdf;
+}*/
+
 
   // Test email
   static async sendTestEmail(to: string, userName: string) {

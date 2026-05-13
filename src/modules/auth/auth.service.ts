@@ -15,7 +15,7 @@ export class AuthService {
   static async register(data: any) {
    const { role, password, name, email, phone: phoneInput,
         businessName, businessType,
-        pickupAddress, pickupLat, pickupLng } = data;
+        pickupAddress, pickupLat, pickupLng, licenseNumber, nidaNumber, vehicleType, vehiclePlate } = data;
    
    // ✅ Validate required fields
     if (!phoneInput) {
@@ -33,7 +33,7 @@ export class AuthService {
 
      const phone = normalizeTZPhone(phoneInput);
 
-    const allowedRoles = ["customer", "driver", "merchant"];
+    const allowedRoles = ["customer", "driver", "merchant", "admin"];
 
     if (!allowedRoles.includes(role)) {
       throw new Error("Invalid role");
@@ -92,6 +92,14 @@ export class AuthService {
           userId: user.id,
           name,
           phone,
+          licenseNumber,
+          nidaNumber,
+          vehicleType,
+         vehiclePlate,
+         isActive: true,
+          isBusy: false,
+          totalDeliveries: 0, 
+          rating: 5.0,
           status: "available",
           totalEarnings: 0,
         },
@@ -141,11 +149,17 @@ export class AuthService {
       throw new Error("Password is required");
     }
   
+   console.log("📞 RAW PHONE:", phoneInput);
+
     const phone = normalizeTZPhone(phoneInput);
+
+   console.log("📞 NORMALIZED PHONE:", phone);
 
     const user = await prisma.user.findUnique({
       where: { phone }
     });
+
+   console.log("👤 USER FOUND:", user);
 
     if (!user) throw new Error("User not found");
 

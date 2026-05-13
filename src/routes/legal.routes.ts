@@ -1,24 +1,38 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import marked from 'marked';
+import { marked } from 'marked';
+import { authMiddleware } from '../middleware/auth.middleware';
+import { requireRole } from '../middleware/role.middleware';
+
+marked.setOptions({
+  gfm: true,
+  breaks: true
+});
 
 const router = Router();
 
 // Path to legal documents
-const legalDir = path.join(__dirname, '../legal');
+const legalDir = path.resolve(process.cwd(), 'legal');
 
 // Helper function to read markdown file
 const readLegalFile = (filename: string): string => {
   const filePath = path.join(legalDir, filename);
+console.log("Legal directory:", legalDir);
+console.log("Reading file:", filePath);
+
   if (!fs.existsSync(filePath)) {
     throw new Error(`File not found: ${filename}`);
   }
-  return fs.readFileSync(filePath, 'utf-8');
+  return fs
+  .readFileSync(filePath, 'utf-8')
+  .replace(/\r\n/g, '\n')
+  .replace(/\r/g, '\n');
 };
 
 // Helper function to send HTML response
 const sendHTML = (content: string, title: string, res: any) => {
+console.log(marked.parse(content));
   res.send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -37,6 +51,9 @@ const sendHTML = (content: string, title: string, res: any) => {
         body {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
           line-height: 1.6;
+	  max-width: 1000px;
+	  margin: 0 auto; 
+	  padding: 20px;
           color: #333;
           background: #f8f9fa;
         }
@@ -62,6 +79,29 @@ const sendHTML = (content: string, title: string, res: any) => {
           margin: 0;
           font-size: 24px;
         }
+        .legal-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 24px 0;
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.legal-content th {
+  background: #0A6E72;
+  color: white;
+  font-weight: 600;
+}
+
+.legal-content th,
+.legal-content td {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+}
+
+.legal-content tr:nth-child(even) {
+  background: #f9fafb;
+}
         .back-button {
           background: #0A6E72;
           color: white;
@@ -164,7 +204,7 @@ const sendHTML = (content: string, title: string, res: any) => {
           <button onclick="window.history.back()" class="back-button">← Back to Site</button>
         </div>
         <div class="legal-content">
-          ${marked.parse(content)}
+          ${content}
           <div class="last-updated">
             Last updated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
           </div>
@@ -186,27 +226,48 @@ const sendJSON = (content: string, res: any) => {
 // List all available legal documents (public endpoint)
 router.get('/list', (req, res) => {
   const documents = [
-    { id: 'terms', title: 'Terms of Service', path: '/legal/terms', type: 'html' },
+    { id: 'terms', title: 'Terms of Service', path: '/legal/terms', type: 'html'},
     { id: 'privacy', title: 'Privacy Policy', path: '/legal/privacy', type: 'html' },
     { id: 'cookies', title: 'Cookie Policy', path: '/legal/cookies', type: 'html' },
     { id: 'refund', title: 'Refund Policy', path: '/legal/refund', type: 'html' },
-    { id: 'delivery', title: 'Delivery Policy', path: '/legal/delivery', type: 'html' },
-    { id: 'exchange', title: 'Exchange Policy', path: '/legal/exchange', type: 'html' },
-    { id: 'warranty', title: 'Warranty Policy', path: '/legal/warranty', type: 'html' },
-    { id: 'pre-policy', title: 'Pre-Order Policy', path: '/legal/pre-policy', type: 'html' },
-    { id: 'EPP', title: 'EMI and Payment Policy', path: '/legal/EPP', type: 'html' },
-    { id: 'dpa', title: 'Data Processing Agreement', path: '/legal/dpa', type: 'json' },
-    { id: 'merchant', title: 'Merchant Agreement', path: '/legal/merchant-agreement', type: 'json' },
-    { id: 'driver', title: 'Driver Agreement', path: '/legal/driver-agreement', type: 'json' }
-  ];
-  res.json(documents);
+    { id: 'delivery', title: 'Delivery Policy', path: '/legal/delivery', type: 'html'},
+    { id: 'exchange', title: 'Exchange Policy', path: '/legal/exchange', type: 'html'},
+    { id: 'warranty', title: 'Warranty Policy', path: '/legal/warranty', type: 'html'},
+    { id: 'pre-policy', title: 'Pre-Order Policy', path: '/legal/pre-policy', type: 'html'},
+    { id: 'EPP', title: 'EMI and Payment Policy', path: '/legal/EPP', type: 'html' }
+     ];
+
+  /*   const roleSpecificDocs = [];
+
+    if (req.user.role === 'merchant') {
+    roleSpecificDocs.push(
+      { id: 'merchant', title: 'Merchant Agreement', path: '/legal/merchant-agreement', type: 'html', roles: ['merchant'] },
+      { id: 'dpa', title: 'Data Processing Agreement', path: '/legal/dpa', type: 'html', roles: ['merchant', 'driver'] }
+    );
+  }
+
+   if (req.user.role === 'driver') {
+    roleSpecificDocs.push(
+      { id: 'driver', title: 'Driver Agreement', path: '/legal/driver-agreement', type: 'html', roles: ['driver'] },
+      { id: 'dpa', title: 'Data Processing Agreement', path: '/legal/dpa', type: 'html', roles: ['merchant', 'driver'] }
+    );
+  }
+  
+  // For public access (no auth), only return public docs
+  if (!req.user) {
+    return res.json(documents);
+}
+
+res.json([...documents, ...roleSpecificDocs]);*/
+
+ return res.json(documents);
 });
 
 // Serve Terms of Service
 router.get('/terms', (req, res) => {
   try {
-    const content = readLegalFile('TERMS_OF_SERVICE.md');
-    sendHTML(content, 'Terms of Service', res);
+    const filePath = path.join(legalDir, 'TERMS_OF_SERVICE.html');
+    res.sendFile(filePath);
   } catch (error) {
     res.status(404).send('<h1>Document not found</h1><p>The requested legal document is currently unavailable.</p><a href="/">Return to Home</a>');
   }
@@ -215,8 +276,8 @@ router.get('/terms', (req, res) => {
 // Privacy Policy
 router.get('/privacy', (req, res) => {
   try {
-    const content = readLegalFile('PRIVACY_POLICY.md');
-    sendHTML(content, 'Privacy Policy', res);
+    const content = readLegalFile('PRIVACY_POLICY.html');
+    res.send(content);
   } catch (error) {
     res.status(404).send('<h1>Document not found</h1><p>The requested legal document is currently unavailable.</p><a href="/">Return to Home</a>');
   }
@@ -225,8 +286,8 @@ router.get('/privacy', (req, res) => {
 // Cookie Policy
 router.get('/cookies', (req, res) => {
   try {
-    const content = readLegalFile('COOKIE_POLICY.md');
-    sendHTML(content, 'Cookie Policy', res);
+    const content = readLegalFile('COOKIE_POLICY.html');
+    res.send(content);
   } catch (error) {
     res.status(404).send('<h1>Document not found</h1><p>The requested legal document is currently unavailable.</p><a href="/">Return to Home</a>');
   }
@@ -235,8 +296,8 @@ router.get('/cookies', (req, res) => {
 // Refund Policy
 router.get('/refund', (req, res) => {
   try {
-    const content = readLegalFile('REFUND_POLICY.md');
-    sendHTML(content, 'Refund Policy', res);
+    const content = readLegalFile('REFUND_POLICY.html');
+    res.send(content);
   } catch (error) {
     // If file doesn't exist, create a default one
     const defaultContent = `# Refund Policy
@@ -265,8 +326,8 @@ For any questions about our refund policy, please contact our support team.`;
 // Delivery Policy
 router.get('/delivery', (req, res) => {
   try {
-    const content = readLegalFile('DELIVERY_POLICY.md');
-    sendHTML(content, 'Delivery Policy', res);
+    const content = readLegalFile('DELIVERY_POLICY.html');
+    res.send(content);
   } catch (error) {
     const defaultContent = `# Delivery Policy
 
@@ -298,8 +359,8 @@ You can track your order in real-time through our app.`;
 // Exchange Policy
 router.get('/exchange', (req, res) => {
   try {
-    const content = readLegalFile('EXCHANGE_POLICY.md');
-    sendHTML(content, 'Exchange Policy', res);
+    const content = readLegalFile('EXCHANGE_POLICY.html');
+    res.send(content);
   } catch (error) {
     const defaultContent = `# Exchange Policy
 
@@ -327,8 +388,8 @@ You have 7 days from delivery date to request an exchange.
 // Warranty Policy
 router.get('/warranty', (req, res) => {
   try {
-    const content = readLegalFile('WARRANTY_POLICY.md');
-    sendHTML(content, 'Warranty Policy', res);
+    const content = readLegalFile('WARRANTY_POLICY.html');
+    res.send(content);
   } catch (error) {
     const defaultContent = `# Warranty Policy
 
@@ -364,8 +425,8 @@ Huria Delivery offers warranty protection on eligible products.
 // Pre-Order Policy
 router.get('/pre-policy', (req, res) => {
   try {
-    const content = readLegalFile('PRE_ORDER_POLICY.md');
-    sendHTML(content, 'Pre-Order Policy', res);
+    const content = readLegalFile('PRE_ORDER_POLICY.html');
+    res.send(content);
   } catch (error) {
     const defaultContent = `# Pre-Order Policy
 
@@ -397,8 +458,8 @@ Full payment is collected at the time of pre-order to secure your item.
 // EMI and Payment Policy
 router.get('/EPP', (req, res) => {
   try {
-    const content = readLegalFile('EMI_PAYMENT_POLICY.md');
-    sendHTML(content, 'EMI and Payment Policy', res);
+    const content = readLegalFile('EMI_AND_PAYMENT_POLICY.html');
+    res.send(content);
   } catch (error) {
     const defaultContent = `# EMI and Payment Policy
 
@@ -429,19 +490,26 @@ All payments are processed through secure, PCI-compliant gateways.`;
 });
 
 // Data Processing Agreement (JSON for API consumption)
-router.get('/dpa', (req, res) => {
+router.get('/dpa', authMiddleware, (req, res) => {
   try {
-    const content = readLegalFile('DATA_PROCESSING_AGREEMENT.md');
-    sendJSON(content, res);
+    const content = readLegalFile('DATA_PROCESSING_AGREEMENT.html');
+    // Check if user is either merchant or driver
+    if (req.user.role === 'merchant' || req.user.role === 'driver') {
+      res.send(content);
+    } else {
+      res.status(403).send('<h1>Access Denied</h1><p>This document is only available to merchants and drivers.</p>');
+    }
   } catch (error) {
     res.status(404).json({ error: 'Document not found' });
   }
 });
 
+// ==================== ROLE-SPECIFIC DOCUMENTS (Auth Required) 
+
 // Merchant Agreement (JSON)
-router.get('/merchant-agreement', (req, res) => {
+router.get('/merchant-agreement', authMiddleware, requireRole('merchant'),  (req, res) => {
   try {
-    const content = readLegalFile('MERCHANT_AGREEMENT.md');
+    const content = readLegalFile('MERCHANT_AGREEMENT.html');
     sendJSON(content, res);
   } catch (error) {
     res.status(404).json({ error: 'Document not found' });
@@ -449,9 +517,9 @@ router.get('/merchant-agreement', (req, res) => {
 });
 
 // Driver Agreement (JSON)
-router.get('/driver-agreement', (req, res) => {
+router.get('/driver-agreement', authMiddleware, requireRole('driver'), (req, res) => {
   try {
-    const content = readLegalFile('DRIVER_AGREEMENT.md');
+    const content = readLegalFile('DRIVER_AGREEMENT.html');
     sendJSON(content, res);
   } catch (error) {
     res.status(404).json({ error: 'Document not found' });
