@@ -20,7 +20,7 @@ export class ProductService {
         merchantId: merchant.id,
 
         variants: {
-          create: (data.variants || []).map((v: any) => ({
+          create: (Array.isArray(data.variants) ? data.variants : []).map((v: any) => ({
             size: v.size,
             color: v.color,
             stock: Number(v.stock),
@@ -118,7 +118,7 @@ export class ProductService {
         images: data.images,
 
         variants: {
-          create: (data.variants || []).map((v: any) => ({
+          create: (Array.isArray(data.variants) ? data.variants : []).map((v: any) => ({
             size: v.size,
             color: v.color,
             stock: Number(v.stock),

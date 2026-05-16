@@ -28,7 +28,7 @@ router.get("/my", authMiddleware, OrderController.getMyOrders);
 router.get('/:orderId', authMiddleware, OrderController.get);
 
 
-router.post('/assign', authMiddleware, requireRole("admin"), OrderController.assignDriver);
+router.post('/assign', authMiddleware, requireRole("admin", "driver"), OrderController.assignDriver);
 
 router.get("/:orderId/tracking", 
   rateLimitMiddleware,  // Prevent excessive tracking requests

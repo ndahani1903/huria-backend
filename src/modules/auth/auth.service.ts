@@ -12,7 +12,7 @@ import {
 } from "../../utils/token.util";
 
 export class AuthService {
-  static async register(data: any) {
+  static async register(data: any, isPasswordPreHashed: boolean = false) {
    const { role, password, name, email, phone: phoneInput,
         businessName, businessType,
         pickupAddress, pickupLat, pickupLng, licenseNumber, nidaNumber, vehicleType, vehiclePlate } = data;
@@ -47,7 +47,12 @@ export class AuthService {
 
     if (existing) throw new Error("User already exists");
 
-    const hashed = await bcrypt.hash(password, 10);
+
+   // Only hash if password is NOT already hashed
+  let hashedPassword = password;
+  if (!isPasswordPreHashed) {
+    hashedPassword = await bcrypt.hash(password, 10);
+  }
 
    const verifyToken = crypto.randomBytes(32).toString("hex");
 
@@ -56,7 +61,7 @@ export class AuthService {
         name,
         phone,
         email: email.toLowerCase(),
-        password: hashed,
+        password: hashedPassword,
         role: role as Role,
         verifyToken,
         verifyTokenExpires: new Date(Date.now() + 1000 * 60 * 60 * 24)
@@ -160,12 +165,26 @@ export class AuthService {
     });
 
    console.log("👤 USER FOUND:", user);
+     console.log("🔐 Input password length:", password.length);
+  console.log("🔐 Stored hash:", user.password);
 
     if (!user) throw new Error("User not found");
 
+   // Test if the hash is valid format
+  try {
     const valid = await bcrypt.compare(password, user.password);
-
+    console.log("👤 Password match result:", valid);
+    
+    // If still false, try with a test hash to see if bcrypt is working
+    const testHash = await bcrypt.hash("123456", 10);
+    const testValid = await bcrypt.compare("123456", testHash);
+    console.log("🔧 Bcrypt working correctly:", testValid);
+   
     if (!valid) throw new Error("Invalid credentials");
+    } catch (bcryptError) {
+    console.error("❌ Bcrypt error:", bcryptError);
+    throw new Error("Invalid credentials");
+  }
 
     let merchantId = null;
     let driverId = null;

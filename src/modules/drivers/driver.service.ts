@@ -137,6 +137,8 @@ static async initDriverAvailability(driverId: string) {
   
   // ✅ HEARTBEAT - Keep driver alive
   static async heartbeat(driverId: string, lat: number, lng: number) {
+    console.log(`💓 Heartbeat from driver ${driverId}`);
+
     // Update location with extended expiry
     const key = `driver:${driverId}:location`;
     await redis.setex(key, 60, JSON.stringify({ lat, lng, lastHeartbeat: Date.now() }) );
@@ -147,6 +149,7 @@ static async initDriverAvailability(driverId: string) {
     // Update last seen timestamp
     await redis.setex(`driver:${driverId}:lastSeen`, 70, Date.now().toString());
     
+   console.log(`✅ Heartbeat recorded for driver ${driverId}`);
     return { success: true };
   }
   
@@ -243,15 +246,33 @@ static async initDriverAvailability(driverId: string) {
 
   // ✅ UPDATE LOCATION (with heartbeat)
   static async updateLocation(driverId: string, lat: number, lng: number) {
+    console.log(`📍 Updating location for driver ${driverId}:`, { lat, lng });
+  
+  // Save to Redis with 60 second expiration
     const key = `driver:${driverId}:location`;
-    await redis.setex(key, 60, JSON.stringify({ lat, lng, timestamp: Date.now() })
-// ✅ Fixed: Use object syntax instead of 4 arguments
-    );
+  const locationData = JSON.stringify({ 
+    lat, 
+    lng, 
+    timestamp: Date.now() 
+  });
+
+     await redis.setex(key, 60, locationData);
+  console.log(`✅ Location saved to Redis: ${key}`);
     console.log(`📍 Driver ${driverId} location updated`);
 
  // Also update heartbeat
     await this.heartbeat(driverId, lat, lng);
  
+   // Update database as well (optional, for fallback)
+  await prisma.driver.update({
+    where: { id: driverId },
+    data: { 
+      currentLat: lat,
+      currentLng: lng,
+      lastLocationAt: new Date()
+    }
+  });
+
   // Broadcast to customers + admin dashboards
   io.emit("driver_location_update", {
     driverId,

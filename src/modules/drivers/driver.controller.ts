@@ -5,19 +5,6 @@ import { prisma } from "../../config/db";
 import redis from "../../config/redis";
 
 export class DriverController {
-/* //we ommit cause it is not used
-static async create(req: AuthRequest, res: Response) {
-    try {
-      const { name, phone } = req.body;
-
-      const driver = await DriverService.create(name, phone);
-
-      res.json(driver);
-    } catch (error) {
-      res.status(500).json({ error: 'Driver creation failed' });
-    }
-  } */
-
   static async completeOrder(req: AuthRequest, res: Response) {
   try {
     const { orderId } = req.body;
@@ -87,6 +74,8 @@ static async create(req: AuthRequest, res: Response) {
       const userId = req.user.id;
       const { lat, lng } = req.body;
       
+     console.log("💓 Heartbeat received:", { userId, lat, lng });
+
       // Find driver by userId
       const driver = await prisma.driver.findUnique({
         where: { userId: userId }
@@ -98,6 +87,7 @@ static async create(req: AuthRequest, res: Response) {
 
       await DriverService.updateLocation(driver.id, lat, lng);
       
+     console.log(`✅ Heartbeat processed for driver ${driver.id}`);
       res.json({ success: true, message: 'Heartbeat received' });
     } catch (error: any) {
       console.error('Heartbeat error:', error.message);
@@ -149,4 +139,37 @@ static async updateLocation(req: AuthRequest, res: Response) {
     res.status(500).json({ error: "Location update failed" });
   }
 }
+
+// In your driver.controller.ts - add this for debugging
+static async checkLocation(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.user.id;
+    const driver = await prisma.driver.findUnique({
+      where: { userId: userId }
+    });
+    
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+    
+    const key = `driver:${driver.id}:location`;
+    const locationRaw = await redis.get(key);
+    const location = locationRaw ? JSON.parse(locationRaw.toString()) : null;
+    
+    const isInAvailableSet = await redis.sismember("drivers:available", driver.id);
+    
+    res.json({
+      driverId: driver.id,
+      location,
+      isInAvailableSet: isInAvailableSet === 1,
+      status: driver.status,
+      currentLat: driver.currentLat,
+      currentLng: driver.currentLng
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+
 }

@@ -22,6 +22,9 @@ router.post("/location",
   DriverController.updateLocation
 );
 
+// In your driver routes
+router.get('/location/check', authMiddleware, requireRole('driver'), DriverController.checkLocation);
+
 router.post('/heartbeat', 
   authMiddleware, 
   rateLimitMiddleware,  // Throttle heartbeat frequency

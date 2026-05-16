@@ -168,17 +168,17 @@ console.log("🧾 REQUEST USER ID:", userId);
   }
 
 
-  // 🧮 STEP 4: PROCESS ITEMS AND CALCULATE TOTALS
-  let subtotal = 0;
-  let totalDiscount = 0;
-  const validatedItems = [];
+  // Group items by merchant
+  const merchantItemsMap = new Map();
 
+  // ✅ STEP 1: Get all products first (outside the merchant grouping loop)
+  const productsWithDetails = [];
   for (const item of items) {
     console.log("🔍 Looking up product:", item.productId);
-
     const product = await prisma.product.findUnique({
       where: { id: item.productId },
     });
+
 
     if (!product) {
       throw new Error(`Product with ID ${item.productId} not found`);
@@ -187,47 +187,80 @@ console.log("🧾 REQUEST USER ID:", userId);
     if (product.stock < item.quantity) {
       throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`);
     }
+   
+    productsWithDetails.push({
+      ...item,
+      product,
+      originalPrice: toNumber(product.price)
+    });
+  }
 
-    const itemTotal = toNumber(product.price) * item.quantity;
+for (const item of productsWithDetails) {
+     const merchantId = item.product.merchantId;
+
+   if (!merchantItemsMap.has(merchantId)) {
+      merchantItemsMap.set(merchantId, []);
+    }
+    
+    merchantItemsMap.get(merchantId).push(item);
+  }
+
+  // Get merchant details for each merchant
+  const merchantIds = Array.from(merchantItemsMap.keys());
+  const merchants = await prisma.merchant.findMany({
+    where: { id: { in: merchantIds } },
+    select: { id: true, pickupLat: true, pickupLng: true, commissionRate: true, tier: true }
+  });
+  
+  const merchantMap = new Map();
+  merchants.forEach(m => merchantMap.set(m.id, m));
+
+  // Calculate delivery fee per merchant (based on distance)
+  const deliveryFeePerMerchant = new Map();
+  
+  for (const merchant of merchants) {
+    let distance = 0;
+    if (merchant.pickupLat && merchant.pickupLng && deliveryLat && deliveryLng) {
+      distance = calculateDistance(merchant.pickupLat, merchant.pickupLng, deliveryLat, deliveryLng);
+    }
+    let fee = Math.max(2000, Math.min(10000, distance * 1000));
+    if (freeDelivery) fee = 0;
+    deliveryFeePerMerchant.set(merchant.id, fee);
+  }
+
+  // Create separate order for each merchant
+  const createdOrders = [];
+  
+  for (const [merchantId, merchantItems] of merchantItemsMap) {
+    const merchant = merchantMap.get(merchantId);
+    const pickupAddress = await MapsService.reverseGeocode(merchant.pickupLat, merchant.pickupLng);
+    const deliveryFee = deliveryFeePerMerchant.get(merchantId);
+
+
+   // 🧮 STEP 4: PROCESS ITEMS AND CALCULATE TOTALS
+  let subtotal = 0;
+  let totalDiscount = 0;
+  const validatedItems = [];
+
+ for (const item of merchantItems) {
+    const itemTotal = item.originalPrice * item.quantity;
     const itemDiscount = itemTotal * (discountPercentage / 100);
     subtotal += itemTotal;
     totalDiscount += itemDiscount;
 
     validatedItems.push({
-      productId: product.id,
+      productId: item.productId,
       quantity: item.quantity,
-      originalPrice: product.price,
-      discountedPrice: toNumber(product.price) * (1 - discountPercentage / 100),
-      merchantId: product.merchantId,
+      originalPrice: item.originalPrice,
+      discountedPrice: item.originalPrice * (1 - discountPercentage / 100),
+      merchantId: merchantId,
     });
   }
 
   const finalAmount = subtotal - totalDiscount;
   console.log(`💰 Subtotal: ${subtotal}, Discount: ${totalDiscount} (${discountPercentage}%), Final: ${finalAmount}`);
-
-  // ✅ STEP 5: CALCULATE DELIVERY FEE
-  let deliveryFee = 2000;
-  if (freeDelivery) {
-    deliveryFee = 0;
-    console.log(`🚚 Free delivery applied`);
-  }
-
-
-  // Calculate delivery fee based on distance if delivery provided
-    if (deliveryLat && deliveryLng && pickupLat && pickupLng) {
-      const distance = calculateDistance(pickupLat, pickupLng, deliveryLat, deliveryLng);
-      deliveryFee = Math.max(2000, Math.min(10000, distance * 1000));
-      if (freeDelivery) deliveryFee = 0;
-    }
-
-
+ 
   // ✅ STEP 6: GET MERCHANT COMMISSION RATES
-  const merchantIds = [...new Set(validatedItems.map(item => item.merchantId))];
-  const merchants = await prisma.merchant.findMany({
-    where: { id: { in: merchantIds } },
-    select: { id: true, commissionRate: true, tier: true }
-  });
-  
   const commissionMap = new Map();
   merchants.forEach(m => commissionMap.set(m.id, m.commissionRate));
   
@@ -242,11 +275,9 @@ console.log("🧾 REQUEST USER ID:", userId);
   
   const driverEarning = deliveryFee * 0.8;
   const platformProfit = totalPlatformFee + (deliveryFee * 0.2);
-  const orderId = `ORD-${Date.now()}`;
+  const orderId = `ORD-${Date.now()}-${merchantId.slice(-4)}`;
   const amount = finalAmount + deliveryFee;
  if (!validatedItems.length) throw new Error("No valid items");
-  const merchantId = validatedItems[0].merchantId;
-const pickupAddress = await MapsService.reverseGeocode(pickupLat, pickupLng);
 
   // 🧾 CREATE ORDER
 const result = await prisma.$transaction(async (tx) => {
@@ -259,8 +290,8 @@ const order = await tx.order.create({
     merchantId,
     status: 'pending',
     tripStage: 'pending',
-    pickupLat,
-    pickupLng,
+    pickupLat: merchant.pickupLat,
+    pickupLng: merchant.pickupLng,
     pickupAddress,
     deliveryLat,
     deliveryLng,
@@ -351,8 +382,9 @@ const order = await tx.order.create({
   return order;
 });
 
-console.log("✅ Checkout completed, order returned:", result.orderId);
+
 return result;
+ }
 }
 
 static async markPaid(orderId: string) {
@@ -387,13 +419,25 @@ static async markPaid(orderId: string) {
 
 
 // Merchant confirms order is ready
-  static async merchantConfirmOrder(orderId: string, merchantId: string) {
-    const order = await prisma.order.findUnique({ where: { orderId } });
-    if (!order) throw new Error("Order not found");
+static async merchantConfirmOrder(orderId: string, merchantId: string) {
+    // Verify order belongs to merchant first
+  const order = await prisma.order.findFirst({
+    where: { 
+      orderId: orderId,
+      merchantId: merchantId 
+    }
+  });
+  
+  if (!order) throw new Error("Order not found or unauthorized");
     if (order.merchantId !== merchantId) throw new Error("Unauthorized");
 
+   // Check if already confirmed
+  if (order.merchantConfirmed) {
+    throw new Error("Order already confirmed");
+  }
+
     const updated = await prisma.order.update({
-      where: { orderId },
+      where: { id: order.id },
       data: { 
         merchantConfirmed: true,
         readyForPickup: true,
@@ -401,10 +445,18 @@ static async markPaid(orderId: string) {
       }
     });
 
-    io.emit("order:update", { orderId, status: order.status, tripStage: 'ready_for_pickup' });
+    io.emit("order:update", { 
+       orderId,
+       status: order.status,
+       tripStage: 'ready_for_pickup'
+     });
     
     // Notify drivers that order is ready
-    io.emit("order:ready", { orderId, pickupLat: order.pickupLat, pickupLng: order.pickupLng });
+    io.emit("order:ready", { 
+        orderId, 
+        pickupLat: order.pickupLat,
+        pickupLng: order.pickupLng 
+     });
     
     return updated;
   }
@@ -769,29 +821,29 @@ console.log("📡 Order completed:", orderId);
     });
   }
 
-
 static async assignDriver(orderId: string) {
+  console.log("🔍 ========== ASSIGN DRIVER SERVICE ==========");
+  console.log("📦 Processing orderId:", orderId);
+
  try {
   const order = await prisma.order.findUnique({
     where: { orderId } });
+
+   console.log("📋 Order found:", {
+      id: order?.id,
+      orderId: order?.orderId,
+      status: order?.status,
+      tripStage: order?.tripStage,
+      merchantId: order?.merchantId,
+      pickupLat: order?.pickupLat,
+      pickupLng: order?.pickupLng
+    });
+
   if (!order) throw new Error("Order not found");
   if (order.status !== "paid") throw new Error("Order not paid yet");
   if (!order || !order.pickupLat || !order.pickupLng) 
     throw new Error('Order location missing');
   
-
-/*
-  //const allDrivers = await prisma.driver.findMany();
-//console.log("ALL DRIVERS:", allDrivers);
-
-//const drivers = await DriverService.getAvailable();
-//console.log("AVAILABLE DRIVERS:", drivers);
-
-const drivers = await prisma.driver.findMany();
-//hii find many inakuwa sio smart dispatch yenyewe dereva yyote anapewa oda
-//hata kama yupo busy, so hii itakuwa alternative endapo smart ikifeli
-*/
-
  // Get available drivers from Redis (convert Buffer to string):
  const driverIdsRaw = await redis.smembers("drivers:available");
 
@@ -847,16 +899,8 @@ const drivers = await prisma.driver.findMany();
      
   console.log("BEST DRIVER:", bestDriver.id, "Distance:", bestScore);
 
-/*
-// Store in memory or database
-  driverLocations.set(driverId, { lat, lng, timestamp: Date.now() });
-  
-  // Broadcast to customers
-  socket.broadcast.emit("driver:location", { driverId, lat, lng });
-}); */
-
 // 📏 CALCULATE DISTANCE
-const distance = bestScore; // already calculated
+const distance = bestScore;
 // 💰 PRICING LOGIC
 const baseFare = 1000; // TZS
 const perKm = 500;

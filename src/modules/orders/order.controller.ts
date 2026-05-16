@@ -25,7 +25,6 @@ console.log("🧾 REQUEST USER ID:", userId);
   static async checkout(req: AuthRequest, res: any) {
   try {
    const { items, pickupLat, pickupLng, deliveryAddressId } = req.body;
-//const { items, pickupLat, pickupLng, deliveryAddressId } = req.body;
 
    // ✅ CHECK IF USER EXISTS
       if (!req.user) {
@@ -134,10 +133,22 @@ static async getMyOrders(req: AuthRequest, res: Response) {
 
 static async assignDriver(req: AuthRequest, res: Response) {
   try {
+   console.log("🎯 ========== ASSIGN DRIVER CALLED ==========");
+    console.log("📝 Request body:", req.body);
+    console.log("👤 User from token:", req.user);
+    console.log("📦 Order ID from body:", req.body.orderId);
+
     const { orderId } = req.body;
 
+    if (!orderId) {
+      console.log("❌ No orderId provided");
+      return res.status(400).json({ error: "Order ID is required" });
+    }
+
+   console.log("🚀 Calling OrderService.assignDriver...");
     const result = await OrderService.assignDriver(orderId);
 
+    console.log("✅ Assign driver successful:", result);
     res.json(result);
   } catch (error: any) {
     console.error("ASSIGN ERROR:", error.message); // 👈 ADD THIS
@@ -147,29 +158,44 @@ static async assignDriver(req: AuthRequest, res: Response) {
   }
 }
 
- static async merchantConfirmOrder(req: AuthRequest, res: Response) {
-    try {
-      const toStringParam = (v: string | string[]) =>
-  Array.isArray(v) ? v[0] : v;
+static async merchantConfirmOrder(req: AuthRequest, res: Response) {
+   try {
+     const toStringParam = (v: string | string[]) =>
+         Array.isArray(v) ? v[0] : v;
 
-      const orderId = toStringParam(req.params.orderId);
-     // const merchantId = req.user.merchantId;
+     const orderId = toStringParam(req.params.orderId);
+
      const merchant = await prisma.merchant.findUnique({
-  where: { userId: req.user.id }
-});
+         where: { userId: req.user!.id }
+      });
 
-const merchantId = merchant?.id;
+   if (!merchant) {
+      return res.status(404).json({ error: "Merchant not found" });
+    }
 
-console.log("👉 PARAM orderId:", orderId);
-    console.log("👉 TOKEN merchantId:", merchantId);
+    const merchantId = merchant?.id;
 
-const order = await prisma.order.findUnique({ where: { orderId } });
+    console.log("👉 PARAM orderId:", orderId);
+    console.log("👉 confirm order, TOKEN merchantId:", merchantId);
+
+    // Verify order belongs to this merchant
+    const order = await prisma.order.findFirst({
+      where: { 
+        orderId: orderId,
+        merchantId: merchant.id 
+      }
+    });
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found or not yours" });
+    }
 
     console.log("👉 DB order merchantId:", order?.merchantId);
 
-      const result = await OrderService.merchantConfirmOrder(orderId, merchantId);
+   const result = await OrderService.merchantConfirmOrder(orderId, merchantId);
       res.json(result);
     } catch (error: any) {
+      console.error("Merchant confirm error:", error);
       res.status(500).json({ error: error.message });
     }
   }

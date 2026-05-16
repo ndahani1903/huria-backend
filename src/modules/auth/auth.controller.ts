@@ -39,7 +39,7 @@ export class AuthController {
   };
 
    static logout = async (req: any, res: Response) => {
-    await AuthService.logout(req.user.id);
+    await AuthService.logout(req.user?.id);
     res.json({ success: true });
   };
 
@@ -169,7 +169,7 @@ const registrationData = pending.data as any;
 // CREATE BASE USER
 const result = await AuthService.register({
   ...registrationData
-});
+}, true);
 
 if (!result?.user?.id) {
   return res.status(500).json({
