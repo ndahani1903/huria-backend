@@ -42,6 +42,12 @@ class RateLimiter {
       maxRequests: 200,
       keyPrefix: 'rl:admin'
     });
+
+   this.configs.set('withdrawal', {
+  windowMs: 60 * 1000, // 1 minute
+  maxRequests: 10, // Only 3 withdrawal attempts per minute (still strict)
+  keyPrefix: 'rl:withdrawal'
+});
   }
   
   async checkLimit(
@@ -80,6 +86,8 @@ class RateLimiter {
           return {0, 0, resetTime}
         end
       `;
+
+      console.log("Before redis eval");
       
       const result = await redis.eval(
         luaScript,
@@ -89,6 +97,8 @@ class RateLimiter {
         config.maxRequests.toString(),
         now.toString()
       ) as any[];
+
+     console.log("After redis eval");
       
       if (result[0] === 1) {
         return {
@@ -144,8 +154,8 @@ const rateLimiter = new RateLimiter();
 export const rateLimitMiddleware = (limitType: string = 'default') => {
   return async (req: Request, res: Response, next: NextFunction) => {
     // Check if redis is available
-    if (!redis) {
-      console.warn('⚠️ Redis not available, skipping rate limit');
+    if (!redis?.isReady) {
+  console.warn("Redis not ready");
       return next();
     }
     
@@ -153,11 +163,21 @@ export const rateLimitMiddleware = (limitType: string = 'default') => {
     const identifier = req.user?.id || req.ip || req.headers['x-forwarded-for'] || 'unknown';
     const identifierStr = Array.isArray(identifier) ? identifier[0] : identifier;
     
+    // Add timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => {
+  const timer = setTimeout(() => {
+    reject(new Error('Rate limit check timeout'));
+  }, 5000);
+});
+    
+    try {
+    console.log("Rate limit start");
     // Check rate limit
-    const { allowed, remaining, resetTime } = await rateLimiter.incrementAndCheck(
-      identifierStr,
-      limitType
-    );
+    const { allowed, remaining, resetTime } = await Promise.race([
+        rateLimiter.incrementAndCheck(identifierStr, limitType),
+        timeoutPromise
+      ]) as any;
+    console.log("Rate limit completed");
     
     // Set rate limit headers
       res.setHeader('X-RateLimit-Remaining', remaining);
@@ -177,6 +197,15 @@ export const rateLimitMiddleware = (limitType: string = 'default') => {
     }
     
     next();
+  } catch (error) {
+      console.error('Rate limit error:', error);
+      // Fail open - allow request to proceed
+      // For withdrawals, you want to be cautious, but better to allow than block legitimate users
+  if (limitType === 'payment') {
+    console.warn(`⚠️ Rate limit failed for payment, allowing request (fail open)`);
+  }
+      next();
+    }
   };
 };
 
@@ -190,6 +219,7 @@ export const authRateLimiter = rateLimitMiddleware('auth');
 export const paymentRateLimiter = rateLimitMiddleware('payment');
 export const apiRateLimiter = rateLimitMiddleware('api');
 export const adminRateLimiter = rateLimitMiddleware('admin');
+export const withdrawalRateLimiter = rateLimitMiddleware('withdrawal');
 
 // Helper function to get max requests for type
 function getMaxRequests(limitType: string): number {

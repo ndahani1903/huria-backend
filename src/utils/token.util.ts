@@ -14,8 +14,13 @@ if (!REFRESH_SECRET) {
   throw new Error("JWT_REFRESH_SECRET is required");
 }
 
-export const signAccessToken = (payload: any) => {
-  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: '7d' });
+export const signAccessToken = (payload: { 
+  id: string; 
+  role: string; 
+  driverId?: string; 
+  merchantType?: string   
+}): string => {
+  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: '15d' });
  };
 
 export const signRefreshToken = (payload: any) => {

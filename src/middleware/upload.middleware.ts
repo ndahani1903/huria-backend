@@ -2,15 +2,33 @@ import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 import cloudinary from "../config/cloudinary";
 
+
+// Dynamic folder based on file fieldname
+const getFolder = (fieldname: string) => {
+  if (fieldname === 'licenseCardImage' || fieldname === 'nidaCardImage') {
+    return 'huria-kyc/documents';
+  }
+  if (fieldname === 'selfieImage' || fieldname === 'passportPhoto') {
+    return 'huria-kyc/selfies';
+  }
+  if (fieldname === 'businessLicenseImage') {
+    return 'huria-kyc/business';
+  }
+  if (fieldname === 'logoImage') {
+    return 'huria-kyc/logos';
+  }
+  return 'huria-kyc/misc';
+};
+
 // ✅ USE CLOUDINARY (not local storage)
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => ({
-    folder: "huria-reviews",
+    folder: getFolder(file.fieldname),
     format: file.mimetype.split("/")[1],
-    public_id: Date.now() + "-" + file.originalname,
+    public_id: Date.now() + "-" + file.originalname.replace(/\s/g, '_'),
     transformation: [
-      { width: 800, height: 800, crop: "limit" },
+      { width: 1024, height: 1024, crop: "limit" },
       { quality: "auto" }
     ]
   })

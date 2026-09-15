@@ -1,50 +1,41 @@
+// src/modules/drivers/driver.service.ts
+
 import { prisma } from '../../config/db';
 import redis from "../../config/redis";
 import { io } from "../../server";
 import driverGamificationService from '../drivers/gamification.service';
 
 export class DriverService {
-  /* static async create(name: string, phone: string) {
-    const user =await prisma.user.create({
-      data: {
-        name,
-        phone,
-        email,
-        password: hashed,
-        role,
-      },
-    });
-
-    await prisma.driver.create({
-      data: {
-        userId: user.id, //link
-        name: user.name,
-        phone: user.phone,
-        status: 'available',
-      },
-    });
-  }      
-*/
-
-static async acceptOrder(orderId: string, driverId: string) {
+ static async acceptOrder(orderId: string, driverId: string) {
     const order = await prisma.order.findUnique({
       where: { orderId },
     });
 
     if (!order) throw new Error("Order not found");
 
+   // Verify driver matches assigned driver
+  if (order.driverId !== driverId) {
+    throw new Error("This order is not assigned to you");
+  }
+
+  if (order.status !== "assigned") {
+    throw new Error("Order not ready for pickup");
+  }
+
     if (order.status !== "paid") {
       throw new Error("Order not ready for pickup");
     }
 
-    // assign driver
+    // Update status to show driver is on the way
     await prisma.order.update({
       where: { orderId },
       data: {
         driverId,
-        status: "assigned",
+        status: "picked_up",
+        tripStage: "picked_up"
       },
     });
+return { success: true, message: "Order accepted" };
 }
 
   // ADD THIS METHOD to DriverService class:

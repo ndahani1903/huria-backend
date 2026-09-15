@@ -1,8 +1,7 @@
+// src/services/pushNotification.service.ts
+
 import admin from 'firebase-admin';
 import { prisma } from '../config/db';
-
-// Initialize Firebase Admin
-/*const serviceAccount = require('../config/firebase-service-account.json');*/
 
  // Firebase config from environment variables
 const serviceAccount = {

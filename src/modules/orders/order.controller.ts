@@ -1,3 +1,5 @@
+// src/modules/orders/order.controller.ts
+
 import { Response } from 'express';
 import { OrderService } from './order.service';
 import { AuthRequest } from '../../middleware/auth.middleware';
@@ -24,7 +26,7 @@ console.log("🧾 REQUEST USER ID:", userId);
 
   static async checkout(req: AuthRequest, res: any) {
   try {
-   const { items, pickupLat, pickupLng, deliveryAddressId } = req.body;
+   const { items, pickupLat, pickupLng, deliveryAddressId, promoCode } = req.body;
 
    // ✅ CHECK IF USER EXISTS
       if (!req.user) {
@@ -39,13 +41,15 @@ console.log("🧾 REQUEST USER ID:", userId);
 
       console.log("✅ Checkout for user:", req.user.id); // ✅ DEBUG
 console.log("📥 Incoming checkout body:", req.body);
+    console.log("🎟️ Promo code received:", promoCode);
 
     const order = await OrderService.checkout(
       req.user.id,
       items,
       pickupLat,
      pickupLng,
-      deliveryAddressId
+      deliveryAddressId,
+      promoCode 
     );
 
     res.json(order);
@@ -108,14 +112,65 @@ static async getMyOrders(req: AuthRequest, res: Response) {
     const userId = req.user.id;
     console.log("Fetching orders for userId:", userId);
     
+    // ✅ OPTIMIZED: Only fetch necessary fields, limit results
     const orders = await prisma.order.findMany({
       where: { userId: userId },
-      include: {
+      select: {
+        id: true,
+        orderId: true,
+        amount: true,
+        totalAmount: true,
+        finalAmount: true,
+        status: true,
+        tripStage: true,
+        createdAt: true,
+        updatedAt: true,
+        completedAt: true,
+        expiresAt: true,
+        discountPercentage: true,
+        discountAmount: true,
+        deliveryFee: true,
+        metadata: true,
+        // ✅ Only select necessary fields from relations
         items: {
-          include: { product: true }
+          select: {
+            id: true,
+            quantity: true,
+            price: true,
+            merchantId: true,
+            product: {
+              select: {
+                id: true,
+                name: true,
+                images: true,
+                merchant: {
+                  select: {
+                    name: true,
+                    businessName: true
+                  }
+                }
+              }
+            }
+          }
+        },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            phone: true
+          }
+        },
+        merchant: {
+          select: {
+            id: true,
+            businessName: true,
+            name: true
+          }
         }
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      // ✅ Limit to recent orders only
+      take: 50
     });
     
     console.log(`Found ${orders.length} orders`);
@@ -131,32 +186,47 @@ static async getMyOrders(req: AuthRequest, res: Response) {
 
 
 
+// In order.controller.ts - update assignDriver
 static async assignDriver(req: AuthRequest, res: Response) {
   try {
-   console.log("🎯 ========== ASSIGN DRIVER CALLED ==========");
-    console.log("📝 Request body:", req.body);
-    console.log("👤 User from token:", req.user);
+    console.log("🎯 ========== ASSIGN DRIVER CALLED ==========");
     console.log("📦 Order ID from body:", req.body.orderId);
 
     const { orderId } = req.body;
 
     if (!orderId) {
-      console.log("❌ No orderId provided");
       return res.status(400).json({ error: "Order ID is required" });
     }
 
-   console.log("🚀 Calling OrderService.assignDriver...");
-    const result = await OrderService.assignDriver(orderId);
-
-    console.log("✅ Assign driver successful:", result);
-    res.json(result);
-  } catch (error: any) {
-    console.error("ASSIGN ERROR:", error.message); // 👈 ADD THIS
-    res.status(500).json({
-      error: error.message, // 👈 RETURN REAL ERROR
+    // First check if order already has a driver assigned
+    const order = await prisma.order.findUnique({
+      where: { orderId },
+      select: { status: true, driverId: true }
     });
+    
+    if (order?.driverId) {
+      // Order already has a driver - just notify that driver
+      const { DriverAssignmentService } = await import('../../services/driverAssignment.service');
+      await DriverAssignmentService.assignDriverWithTimeout(orderId, order.driverId);
+      return res.json({ success: true, message: "Driver notified" });
+    }
+
+    const { DriverAssignmentService } = await import('../../services/driverAssignment.service');
+    const result = await DriverAssignmentService.attemptAssignment(orderId, 0);
+
+    console.log("✅ Assign driver result:", result);
+
+    if (result) {
+      res.json({ success: true, message: "Driver assigned successfully" });
+    } else {
+      res.json({ success: false, message: "No drivers available, will retry automatically" });
+    }
+  } catch (error: any) {
+    console.error("ASSIGN ERROR:", error.message);
+    res.status(500).json({ error: error.message });
   }
 }
+
 
 static async merchantConfirmOrder(req: AuthRequest, res: Response) {
    try {
@@ -270,6 +340,79 @@ static async tracking(req: AuthRequest, res: Response) {
   }
  }
 
+
+
+/**
+ * Admin: Mark FBU order as delivered (bypasses OTP)
+ */
+static async markFBUDelivered(req: AuthRequest, res: Response) {
+  try {
+    const { orderId } = req.body;
+    
+    if (!orderId) {
+      return res.status(400).json({ error: 'Order ID required' });
+    }
+    
+    const order = await prisma.order.findUnique({
+      where: { orderId },
+      include: { user: true }
+    });
+    
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    
+    if (order.shippingMode !== 'FBU_COURIER') {
+      return res.status(400).json({ error: 'This endpoint is only for FBU orders' });
+    }
+    
+    if (order.status === 'delivered' || order.status === 'completed') {
+      return res.status(400).json({ error: 'Order already delivered or completed' });
+    }
+    
+    // Generate a dummy OTP for FBU orders (or skip OTP requirement)
+    const dummyOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    const updated = await prisma.order.update({
+      where: { orderId },
+      data: {
+        status: 'delivered',
+        tripStage: 'delivered',
+        otp: dummyOtp,
+        deliveryArrivalTime: new Date()
+      }
+    });
+    
+    // Log admin action
+    await prisma.auditLog.create({
+      data: {
+        adminId: req.user!.id,
+        action: 'MARK_FBU_DELIVERED',
+        targetType: 'order',
+        targetId: orderId,
+        meta: { shippingMode: order.shippingMode },
+        severity: 'info'
+      }
+    });
+    
+    // Send SMS to customer
+    if (order.user?.phone) {
+      const { SMSService } = await import('../../services/sms.service');
+      await SMSService.sendRealSMS(
+        order.user.phone,
+        `📦 Your FBU order ${orderId} has been delivered! Thank you for shopping with HURIA.`
+      );
+    }
+    
+    res.json({ success: true, order: updated });
+    
+  } catch (error: any) {
+    console.error('Mark FBU delivered error:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+
 static async merchantOrders(req, res) {
  const data = await OrderService.getMerchantOrders(req.user!.id);
  res.json(data);
@@ -280,4 +423,20 @@ static async merchantStats(req, res) {
  res.json(data);
 }
 
+
+static async preview(req: AuthRequest, res: Response) {
+  try {
+    const { items, deliveryAddressId } = req.body;
+
+    const result = await OrderService.previewDelivery(
+      req.user!.id,
+      items,
+      deliveryAddressId
+    );
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+}
 }

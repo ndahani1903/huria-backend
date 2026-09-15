@@ -1,3 +1,5 @@
+// src/modules/admin/audit.service.ts
+
 import { prisma } from "../../config/db";
 
 export type AuditAction =

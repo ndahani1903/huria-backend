@@ -1,3 +1,5 @@
+// src/modules/merchants/merchantWallet.service.ts
+
 import { prisma } from '../../config/db';
 import { NotificationService } from '../notifications/notification.service';
 import { SMSService } from '../../services/sms.service';
@@ -33,6 +35,46 @@ export class MerchantWalletService {
     
     return wallet;
   }
+
+  // ✅ COMPLETE getWallet method - used by controller
+  static async getWallet(merchantId: string) {
+    console.log(`🔍 Getting wallet for merchant: ${merchantId}`);
+
+    const wallet = await this.getOrCreateWallet(merchantId);
+
+   console.log(`📊 Wallet found:`, {
+    id: wallet.id,
+    balance: Number(wallet.balance),
+    pendingBalance: Number(wallet.pendingBalance),
+    totalEarned: Number(wallet.totalEarned),
+    transactionCount: wallet.transactions?.length || 0
+  });
+
+    return {
+      id: wallet.id,
+      balance: Number(wallet.balance),
+      pendingBalance: Number(wallet.pendingBalance),
+      totalEarned: Number(wallet.totalEarned),
+      transactions: wallet.transactions?.map(t => ({
+        id: t.id,
+        amount: Number(t.amount),
+        type: t.type,
+        status: t.status,
+        description: t.description,
+        createdAt: t.createdAt
+      })) || []
+    };
+  }
+
+  // ✅ Get balance only (used by dashboard)
+  static async getBalance(merchantId: string) {
+    const wallet = await this.getOrCreateWallet(merchantId);
+    return {
+      balance: Number(wallet.balance),
+      pendingBalance: Number(wallet.pendingBalance),
+      totalEarned: Number(wallet.totalEarned)
+    };
+  }
   
   static async credit(merchantId: string, amount: number) {
      try {
@@ -41,10 +83,6 @@ export class MerchantWalletService {
       data: {
         balance: { increment: amount },
        },
-        //create: {
-         // merchantId,
-         // balance: amount,
-     // },
     });
 
 console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balance: ${wallet.balance}`);
@@ -100,19 +138,36 @@ console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balanc
   static async releaseCredit(merchantId: string, orderId: string) {
     const wallet = await this.getOrCreateWallet(merchantId);
     
+   // ✅ Get the actual order to find the correct order ID format
+  let actualOrderId = orderId;
+
+    // If it's a business ID (starts with ORD-), find the internal ID
+  if (orderId.startsWith('ORD-')) {
+    const order = await prisma.order.findUnique({
+      where: { orderId: orderId },
+      select: { id: true }
+    });
+    if (order) {
+      actualOrderId = order.id;
+    }
+  }
+
+
     // Find the pending transaction
     const pendingTransaction = await prisma.merchantTransaction.findFirst({
       where: {
         walletId: wallet.id,
-        orderId,
+        orderId: actualOrderId,
         type: 'pending_credit',
         status: 'pending'
       }
     });
     
     if (!pendingTransaction) {
-      throw new Error('No pending transaction found for this order');
-    }
+    console.log(`⚠️ No pending transaction found for merchant ${merchantId}, order ${orderId}`);
+    // Don't throw error - just return
+    return { success: false, message: 'No pending transaction found' };
+  }
     
     // Update wallet balances
     await prisma.merchantWallet.update({
@@ -152,15 +207,6 @@ console.log(`💰 Merchant ${merchantId} credited with ${amount} TZS. New balanc
     return { success: true, amount: pendingTransaction.amount };
   }
   
-  // Get wallet balance
-  static async getBalance(merchantId: string) {
-    const wallet = await this.getOrCreateWallet(merchantId);
-    return {
-      balance: wallet.balance,
-      pendingBalance: wallet.pendingBalance,
-      totalEarned: wallet.totalEarned
-    };
-  }
   
   // Request withdrawal
   static async requestWithdrawal(merchantId: string, amount: number, phone: string) {
@@ -229,15 +275,20 @@ await SMSService.sendRealSMS(withdrawal.wallet.merchant.user.phone,
     
     return updated;
   }
-  
+
   // Get transaction history
   static async getTransactionHistory(merchantId: string, limit = 20) {
     const wallet = await this.getOrCreateWallet(merchantId);
     
-    return prisma.merchantTransaction.findMany({
+    const transactions = await prisma.merchantTransaction.findMany({
       where: { walletId: wallet.id },
       orderBy: { createdAt: 'desc' },
       take: limit
     });
+    
+    return transactions.map(t => ({
+      ...t,
+      amount: Number(t.amount)
+    }));
   }
 }

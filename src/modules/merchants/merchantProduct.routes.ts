@@ -17,12 +17,6 @@ router.use(authMiddleware, requireRole("merchant"));
 // Product CRUD operations
 router.get("/products", rateLimitMiddleware, MerchantProductController.getMyProducts);
 
-router.post("/products", 
-authRateLimiter,  // Stricter limit for creating products
-upload.array("images", 5), MerchantProductController.createProduct);
-
-router.put("/products/:id",  rateLimitMiddleware, MerchantProductController.updateProduct);
-
 router.delete("/products/:id", rateLimitMiddleware, MerchantProductController.deleteProduct);
 
 export default router;

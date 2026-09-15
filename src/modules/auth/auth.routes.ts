@@ -1,11 +1,14 @@
+// src/modules/auth/auth.routes.ts
+
 import { Router } from "express";
 import {
   AuthController,
   startRegistration,
   completeRegistration
 } from "./auth.controller";
+import { authMiddleware } from "../../middleware/auth.middleware";
 import { 
-  rateLimitMiddleware, 
+  apiRateLimiter, 
   authRateLimiter, 
   paymentRateLimiter 
 } from '../../middleware/rateLimit.middleware';
@@ -18,7 +21,7 @@ router.post("/register", authRateLimiter, AuthController.register);
 router.post("/login", authRateLimiter, AuthController.login);
 
 // Refresh token
-router.post("/refresh-token", rateLimitMiddleware, AuthController.refresh);
+router.post("/refresh-token", apiRateLimiter, AuthController.refresh);
 
 // Logout
 router.post("/logout", authRateLimiter, AuthController.logout);
@@ -29,7 +32,7 @@ router.post("/forgot-password", authRateLimiter, AuthController.forgotPassword);
 router.post("/reset-password", authRateLimiter, AuthController.resetPassword);
 
 // Email verification
-router.post("/verify-email", rateLimitMiddleware, AuthController.verifyEmail);
+router.post("/verify-email", apiRateLimiter, AuthController.verifyEmail);
 
 /*router.post("/resend-verification", authRateLimiter, AuthController.resendVerification);
   */
@@ -37,6 +40,13 @@ router.post("/verify-email", rateLimitMiddleware, AuthController.verifyEmail);
 router.post("/start-registration", startRegistration);
 router.post("/complete-registration", completeRegistration);
 
+// Phone OTP verification
+router.post("/send-otp", authMiddleware, AuthController.sendOTP);
+router.post("/verify-otp", authMiddleware, AuthController.verifyOTP);
+router.post("/resend-otp", authMiddleware, AuthController.resendOTP);
+
+// Check if phone is verified
+router.get("/verification-status", authMiddleware, AuthController.verificationStatus);
 
 
 export default router;

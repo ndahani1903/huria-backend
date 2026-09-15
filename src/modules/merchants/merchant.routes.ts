@@ -27,16 +27,15 @@ router.get("/earnings",
   MerchantController.getEarnings
 );
 
-/*
 
 // Optional: Dashboard stats
 router.get("/dashboard/stats", 
   authMiddleware, 
   requireRole("merchant"), 
   rateLimitMiddleware,
-  MerchantController.getDashboardStats
+  MerchantController.getDashboard
 );
-*/
+
 
 
 export default router;

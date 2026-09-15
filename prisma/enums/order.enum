@@ -1,0 +1,48 @@
+enum OrderStatus {
+  pending
+  paid
+  assigned
+  ready_for_pickup
+  arrived_pickup
+  picked_up
+  in_transit
+  en_route
+  delivered
+  completed
+  cancelled
+  archived
+}
+
+enum OrderPriority {
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ShippingMode {
+  LOCAL_DISPATCH
+  FBU_COURIER
+}
+
+enum FBURequestStatus {
+  pending_pickup
+  pickup_scheduled
+  picked_up
+  warehouse_received
+  dispatched
+  completed
+}
+
+enum VehicleType {
+  motorcycle
+  bajaj
+  truck
+}
+
+enum WeightBracket {
+  LIGHT
+  MEDIUM
+  HEAVY
+  VERY_HEAVY
+  BULK
+}

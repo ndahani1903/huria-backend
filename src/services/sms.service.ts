@@ -1,3 +1,5 @@
+// src/services/sms.service.ts
+
 import { sms } from '../config/sms';
 
 export class SMSService {
@@ -160,30 +162,3 @@ Track: ${process.env.APP_URL}/tracking/${orderId}`;
     }
   }
 }
-
-
-
-
-
-
-{/*import twilio from 'twilio';
-
-// Initialize Twilio client
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
-
-let client: twilio.Twilio | null = null;
-
- //i dont have twillio yet
-if (accountSid && authToken) {
-  client = twilio(accountSid, authToken);
-  console.log("✅ Twilio SMS service initialized");
-} else {
-  console.log("⚠️ Twilio not configured - SMS will use console.log fallback");
-} 
- 
-export class SMSService {
- 
- 
-}*/}

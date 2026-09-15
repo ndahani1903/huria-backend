@@ -27,6 +27,7 @@ enum OrderStatus {
   delivered
   completed
   cancelled
+  archived
 }
 
 enum PaymentStatus {
@@ -42,6 +43,7 @@ enum PaymentStatus {
 enum TransactionType {
   credit
   debit
+  withdrawal
 }
 
 enum TransactionStatus {
@@ -65,6 +67,115 @@ enum WithdrawalStatus {
   failed
 }
 
+enum WeightBracket {
+  LIGHT
+  MEDIUM
+  HEAVY
+  VERY_HEAVY
+  BULK
+}
+
+enum VehicleType {
+  motorcycle
+  bajaj
+  truck
+}
+
+enum ShippingMode {
+  LOCAL_DISPATCH
+  FBU_COURIER
+}
+
+enum FBURequestStatus {
+  pending_pickup
+  pickup_scheduled
+  picked_up
+  warehouse_received
+  dispatched
+  completed
+}
+
+enum MerchantType {
+  GENERAL_ECOMMERCE
+  SUPERMARKET
+  RESTAURANT
+}
+
+enum OrderPriority {
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// KYC Verification Status enum
+enum KYCStatus {
+  NOT_SUBMITTED
+  PENDING
+  APPROVED
+  REJECTED
+  FROZEN
+}
+
+enum CardTransactionType {
+  TOPUP
+  PURCHASE
+  REFUND
+  REVERSAL
+  CASHBACK
+  ADJUSTMENT
+  SUBSCRIPTION
+  TRANSFER
+}
+
+enum PrivacyLevel {
+  PUBLIC
+  FOLLOWERS
+  PRIVATE
+}
+
+enum FollowStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  FILE
+  LOCATION
+  CONTACT
+}
+
+enum NotificationType {
+  FOLLOW
+  FOLLOW_ACCEPTED
+  POST_LIKE
+  POST_COMMENT
+  COMMENT_REPLY
+  STORY_LIKE
+  STORY_VIEW
+  MESSAGE
+  MENTION
+  TAG
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  LAUGH
+  WOW
+  SAD
+  ANGRY
+}
+
 model User {
   id                   String    @id @default(uuid())
   name                 String
@@ -79,13 +190,23 @@ model User {
   passwordResetToken   String?
   passwordResetExpires DateTime?
 
+  // Phone verification
+  phoneVerified     Boolean   @default(false)
+  phoneVerifiedAt   DateTime?
+  phoneOTP          String? // Store hashed OTP
+  phoneOTPExpiresAt DateTime?
+  phoneOTPAttempts  Int       @default(0)
+
   verifyToken        String?
   verifyTokenExpires DateTime?
 
-  role      Role      @default(customer)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  role       Role      @default(customer)
+  userRoleId String? // New field for custom role
+  userRole   userRole? @relation(fields: [userRoleId], references: [id])
+  status     String    @default("active") // active, suspended, banned
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
 
   // Relations
   driver                   Driver?
@@ -102,6 +223,49 @@ model User {
   addresses                Address[]
   Review                   Review[]
   UserNotificationSettings UserNotificationSettings?
+  PromoUsage               PromoUsage[]
+  SupportTicket            SupportTicket[]
+  SupportMessage           SupportMessage[]
+  HuriaCard                HuriaCard?
+  HCoinTransaction         HCoinTransaction[]
+  StoreReview              StoreReview[]
+  CustomerSearchAnalytics  CustomerSearchAnalytics[]
+  CustomerProductAffinity  CustomerProductAffinity[]
+
+  postShares    PostShare[]
+  postMentions  PostMention[]
+  messageReads  MessageRead[]
+  reelViews     ReelView[]
+  reelComments  ReelComment[]
+  reelLikes     ReelLike[]
+  savedPosts    SavedPost[]
+  socialProfile SocialProfile?
+  presence      UserPresence?
+
+  followers Follow[] @relation("FollowingRelation")
+  following Follow[] @relation("FollowerRelation")
+
+  blockedUsers   UserBlock[] @relation("Blocker")
+  blockedByUsers UserBlock[] @relation("Blocked")
+
+  sentStoryReplies     StoryReply[] @relation("StoryReplySender")
+  receivedStoryReplies StoryReply[] @relation("StoryReplyReceiver")
+
+  socialPosts     SocialPost[]
+  socialComments  SocialComment[]
+  socialPostLikes SocialPostLike[]
+  socialStories   SocialStory[]
+  storyViews      StoryView[]
+  storyReactions  StoryReaction[]
+  reels           Reel[]
+  conversations   ConversationMember[]
+  messages        Message[]
+  notifications   SocialNotification[]
+  searchHistory   SocialSearchHistory[]
+
+  triggeredNotifications SocialNotification[] @relation("NotificationActor")
+
+  ActivityLog ActivityLog[]
 
   // Indexes
   @@index([email])
@@ -132,15 +296,25 @@ model Driver {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // KYC Fields
+  kycStatus      KYCStatus @default(NOT_SUBMITTED)
+  kycSubmittedAt DateTime?
+  kycVerifiedAt  DateTime?
+  kycVerifiedBy  String?
+  frozenAt       DateTime?
+
   // Relations
   user          User                @relation(fields: [userId], references: [id])
   wallet        Wallet?
+  kyc           DriverKYC?
   withdrawals   Withdrawal[]
   orders        Order[]
   advances      DriverAdvance[]
   achievements  DriverAchievement[]
   DriverMission DriverMission[]
 
+  @@index([kycStatus])
+  @@index([frozenAt])
   @@index([status])
   @@index([isActive, currentLat, currentLng])
   @@index([rating])
@@ -149,12 +323,31 @@ model Driver {
 }
 
 model Merchant {
-  id           String  @id @default(uuid())
-  userId       String  @unique
+  id           String       @id @default(uuid())
+  userId       String       @unique
   name         String
   phone        String
   businessName String?
   businessType String?
+  merchantType MerchantType @default(GENERAL_ECOMMERCE)
+
+  coverImage String? // URL for restaurant/supermarket cover photo
+  logoImage  String? // Optional logo image
+
+  // Restaurant specific fields
+  preparationTime Int?     @default(30) // Minutes
+  cuisineType     String? // e.g., "Italian", "Chinese", "Local"
+  dietaryTags     String[] @default([]) // ["Veg", "Halal", "Gluten-Free"]
+
+  isActive       Boolean  @default(true)
+  isAcceptingOrders   Boolean @default(true)
+  maxDeliveryRadiusKm Float?  @default(40) // Maximum delivery distance
+
+  // Supermarket specific fields
+  hasBarcodeScanner        Boolean  @default(false)
+  aisleCategories          String[] @default([])
+  supportsBulkDiscount     Boolean  @default(false)
+  expressDeliveryAvailable Boolean  @default(false)
 
   // ✅ ADD THESE
   pickupAddress String?
@@ -170,39 +363,123 @@ model Merchant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  // Relations
-  user            User              @relation(fields: [userId], references: [id])
-  products        Product[]
-  orders          Order[]
-  wallet          MerchantWallet?
-  escrowMerchants EscrowMerchant[]
-  advances        MerchantAdvance[]
+  // KYC Fields
+  kycStatus      KYCStatus @default(NOT_SUBMITTED)
+  kycSubmittedAt DateTime?
+  kycVerifiedAt  DateTime?
+  kycVerifiedBy  String?
+  frozenAt       DateTime?
 
+  // Relations
+  user                User                  @relation(fields: [userId], references: [id])
+  products            Product[]
+  orders              Order[]
+  wallet              MerchantWallet?
+  kyc                 MerchantKYC?
+  escrowMerchants     EscrowMerchant[]
+  advances            MerchantAdvance[]
+  PromoCode           PromoCode[]
+  FBUWarehouseRequest FBUWarehouseRequest[]
+  storeReviews        StoreReview[]
+  operatingHours      OperatingHours[]
+  deliveryZones       DeliveryZone[]
+  DriverDispatchQueue DriverDispatchQueue[]
+  MerchantWithdrawal  MerchantWithdrawal[]
+
+  @@index([kycStatus])
+  @@index([frozenAt])
   @@index([businessName])
   @@index([rating, totalSales])
 }
 
 model Product {
-  id            String   @id @default(uuid())
+  id            String  @id @default(uuid())
   name          String
-  price         Decimal  @db.Decimal(18, 2)
-  stock         Int      @default(0)
-  reservedStock Int      @default(0)
+  price         Decimal @db.Decimal(18, 2)
+  stock         Int     @default(0)
+  reservedStock Int     @default(0)
   description   String?
-  isActive      Boolean  @default(true)
+  isActive      Boolean @default(true)
   images        Json?
   category      String
+
+  weightBracket   WeightBracket @default(LIGHT)
+  allowedVehicles VehicleType[] @default([motorcycle, bajaj, truck])
+
+  // ========== NEW FIELDS FOR FILTERING & DEALS ==========
+  tags        String[] @default([]) // ["gift", "deal", "premium", "new"]
+  rating      Float    @default(0) // 0-5 stars
+  reviewCount Int      @default(0)
+  gender      String?  @default("unisex") // "men", "women", "boys", "girls", "unisex"
+
+  // Flash Sale Fields
+  isFlashSale   Boolean   @default(false)
+  flashSaleEnd  DateTime? // When flash sale ends
+  flashDiscount Int       @default(0) // Discount percentage during flash sale
+
+  // Deal Fields
+  isDeal       Boolean   @default(false)
+  dealEndDate  DateTime?
+  dealDiscount Int       @default(0)
+
+  // New User Offer Fields
+  newUserDiscount  Int     @default(0) // Special discount for new users (0-100%)
+  discountEligible Boolean @default(false) // Can this product be discounted for new users
+
+  // ✅ NEW FIELDS FOR RESTAURANT
+  isAvailable     Boolean  @default(true)
+  preparationTime Int?     @default(15) // Minutes per item
+  dietaryInfo     String[] @default([])
+  isSpicy         Boolean  @default(false)
+  isVegetarian    Boolean  @default(false)
+  isVegan         Boolean  @default(false)
+  isGlutenFree    Boolean  @default(false)
+
+  // ✅ NEW FIELDS FOR SUPERMARKET
+  barcode              String?   @unique
+  expiryDate           DateTime?
+  weight               Float? // In grams
+  unit                 String? // "kg", "g", "liter", "piece"
+  aisleLocation        String? // "Aisle 4, Shelf B"
+  minimumOrderQuantity Int       @default(1)
+  maximumOrderQuantity Int?      @default(99)
+  bulkDiscountQuantity Int? // Buy 3 get discount
+  bulkDiscountPercent  Int? // Discount percentage for bulk
+  nutritionalInfo      Json? // Calories, protein, carbs, etc.
+
+  // ✅ MODIFIERS/ADD-ONS for Restaurant items
+  modifiers Json? @default("[]") // [{name:"Extra Cheese", price:2000}]
+
+  // Legacy fields
   version       Int      @default(0)
   averageRating Float?   @default(0)
   merchantId    String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  // Search keywords for better product discovery
+  searchKeywords     String[]  @default([]) // ["burger", "fast food", "grilled", "beef"]
+  synonymTerms       String[]  @default([]) // ["hamburger", "patty"] - related search terms
+  popularSearchCount Int       @default(0) // How many times this product appears in searches
+  lastSearchAt       DateTime? // Last time product was searched
+
+  // Customer behavior tracking
+  viewCount      Int   @default(0) // Total views
+  uniqueViewers  Int   @default(0) // Unique customers who viewed
+  addToCartCount Int   @default(0) // Times added to cart
+  purchaseCount  Int   @default(0) // Times purchased
+  conversionRate Float @default(0) // (purchases / views) * 100
+
+  // Personalization data
+  customerAffinityScore Float @default(0) // ML score for customer preferences
+
   // Relations
-  merchant   Merchant         @relation(fields: [merchantId], references: [id])
-  orderItems OrderItem[]
-  variants   ProductVariant[]
-  Review     Review[]
+  merchant                Merchant                  @relation(fields: [merchantId], references: [id])
+  orderItems              OrderItem[]
+  variants                ProductVariant[]
+  Review                  Review[]
+  CustomerProductAffinity CustomerProductAffinity[]
+  ProductSearchIndex      ProductSearchIndex?
 
   // Indexes
   @@index([name, category, description])
@@ -212,6 +489,117 @@ model Product {
   @@index([category, price])
   @@index([createdAt(sort: Desc)])
   @@index([stock, merchantId])
+  @@index([isFlashSale, flashSaleEnd])
+  @@index([isDeal, dealEndDate])
+  @@index([gender])
+  @@index([tags])
+  @@index([rating])
+}
+
+// ✅ NEW: Customer Search Analytics for ML learning
+model CustomerSearchAnalytics {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Search session data
+  searchTerm   String // What customer searched for
+  searchDate   DateTime @default(now())
+  searchSource String // "search_bar", "category_filter", "recommended"
+
+  // Results interaction
+  resultsCount   Int      @default(0)
+  productsViewed String[] @default([]) // Product IDs they viewed
+  productClicked String? // Product ID they clicked
+  timeSpentMs    Int      @default(0) // Time spent on search results
+
+  // Purchase outcome
+  addedToCart        Boolean @default(false)
+  purchased          Boolean @default(false)
+  purchasedProductId String?
+
+  // Device info
+  deviceType  String? // mobile, desktop
+  locationLat Float?
+  locationLng Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([searchTerm])
+  @@index([searchDate])
+  @@index([userId, searchDate])
+}
+
+// ✅ NEW: Customer Product Affinity (ML learning data)
+model CustomerProductAffinity {
+  id        String  @id @default(uuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Affinity scores (0-100)
+  viewScore     Float @default(0) // Based on view frequency
+  searchScore   Float @default(0) // Based on search matches
+  purchaseScore Float @default(0) // Based on purchase history
+  overallScore  Float @default(0) // Weighted average
+
+  // Interaction counts
+  viewCount      Int @default(0)
+  searchCount    Int @default(0)
+  clickCount     Int @default(0)
+  addToCartCount Int @default(0)
+  purchaseCount  Int @default(0)
+
+  // Time decay
+  lastInteraction DateTime @default(now())
+  weightDecay     Float    @default(1.0) // Reduces over time for old interactions
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, productId])
+  @@index([userId, overallScore])
+  @@index([productId])
+  @@index([overallScore])
+}
+
+// ✅ NEW: Popular Search Terms (for autocomplete and trending)
+model PopularSearchTerm {
+  id               String   @id @default(uuid())
+  term             String   @unique
+  searchCount      Int      @default(0)
+  resultCount      Int      @default(0)
+  clickThroughRate Float    @default(0)
+  lastSearched     DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([searchCount])
+  @@index([lastSearched])
+}
+
+// ✅ NEW: Product Search Index (for full-text search optimization)
+model ProductSearchIndex {
+  id        String  @id @default(uuid())
+  productId String  @unique
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Pre-computed search fields
+  nameVector    String? // Processed name for better matching
+  keywordVector String? // Processed keywords
+  combinedText  String? // All searchable text combined
+
+  // Search boost scores
+  nameBoost     Float @default(1.0)
+  keywordBoost  Float @default(0.8)
+  categoryBoost Float @default(0.6)
+
+  updatedAt DateTime @updatedAt
+
+  @@index([nameVector])
+  @@index([keywordVector])
 }
 
 model ProductVariant {
@@ -235,14 +623,45 @@ model Order {
   merchantId         String
   driverId           String?
   amount             Decimal     @db.Decimal(18, 2)
+  totalAmount        Decimal?    @db.Decimal(18, 2)
   status             OrderStatus @default(pending)
   tripStage          OrderStatus @default(pending)
   otp                String?
   otpExpiresAt       DateTime?
   otpAttempts        Int         @default(0)
-  discountPercentage Float?
-  discountAmount     Decimal?
-  finalAmount        Decimal?
+  discountPercentage Float?      @default(0)
+  discountAmount     Decimal?    @default(0) @db.Decimal(18, 2)
+  finalAmount        Decimal?    @db.Decimal(18, 2)
+
+  shippingMode           ShippingMode @default(LOCAL_DISPATCH)
+  assignedVehicle        VehicleType?
+  logisticsMetadata      Json?        @default("{}")
+  fbuPickupScheduled     Boolean      @default(false)
+  fbuPickupScheduledAt   DateTime?
+  fbuWarehouseReceived   Boolean      @default(false)
+  fbuWarehouseReceivedAt DateTime?
+
+  // ✅ NEW FIELDS FOR RESTAURANT/SUPERMARKET
+  orderPriority          OrderPriority @default(NORMAL)
+  readyForPickupAt       DateTime?
+  preparationStartedAt   DateTime?
+  preparationCompletedAt DateTime?
+  estimatedReadyTime     DateTime?
+  autoCancelAt           DateTime?
+
+  // ✅ Restaurant specific
+  requiresDriverAt   DateTime? // When to dispatch driver
+  acceptanceDeadline DateTime? // 5 min deadline
+  acceptedAt         DateTime?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+
+  // ✅ Supermarket specific
+  packingCompletedAt DateTime?
+  aislePickingNotes  String?
+
+  // Relations
+  fbuRequest FBUWarehouseRequest?
 
   pickupLat         Float?
   pickupLng         Float?
@@ -271,17 +690,22 @@ model Order {
   completedAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  expiresAt     DateTime?
+  metadata      Json?
 
   // Relations
-  user      User        @relation(fields: [userId], references: [id])
-  merchant  Merchant    @relation(fields: [merchantId], references: [id])
-  driver    Driver?     @relation(fields: [driverId], references: [id])
-  payment   Payment?
-  items     OrderItem[]
-  escrow    Escrow?
-  disputes  Dispute[]
-  Address   Address?    @relation(fields: [addressId], references: [id])
-  addressId String?
+  user                User                 @relation(fields: [userId], references: [id])
+  merchant            Merchant             @relation(fields: [merchantId], references: [id])
+  driver              Driver?              @relation(fields: [driverId], references: [id])
+  payment             Payment?
+  items               OrderItem[]
+  escrow              Escrow?
+  disputes            Dispute[]
+  Address             Address?             @relation(fields: [addressId], references: [id])
+  addressId           String?
+  PromoUsage          PromoUsage[]
+  DriverDispatchQueue DriverDispatchQueue?
+  ManualDispatchQueue ManualDispatchQueue?
 
   // Indexes
   @@index([status])
@@ -300,6 +724,36 @@ model Order {
   @@index([driverId, status])
   @@index([merchantId, status])
   @@index([createdAt, status])
+  @@index([status, expiresAt])
+}
+
+model FBUWarehouseRequest {
+  id                       String           @id @default(uuid())
+  orderId                  String           @unique
+  order                    Order            @relation(fields: [orderId], references: [orderId])
+  merchantId               String
+  merchant                 Merchant         @relation(fields: [merchantId], references: [id])
+  merchantName             String?
+  merchantPhone            String?
+  merchantAddress          String?
+  merchantPickupLat        Float?
+  merchantPickupLng        Float?
+  items                    Json // Store cart items
+  totalWeight              Float
+  totalAmount              Decimal          @db.Decimal(18, 2)
+  status                   FBURequestStatus @default(pending_pickup)
+  pickupScheduledAt        DateTime?
+  pickupCompletedAt        DateTime?
+  warehouseReceivedAt      DateTime?
+  assignedWarehouseStaffId String?
+  notes                    String?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  @@index([orderId])
+  @@index([merchantId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Address {
@@ -332,37 +786,45 @@ model OrderItem {
   price      Decimal @db.Decimal(18, 2)
 
   // Relations
-  order   Order   @relation(fields: [orderId], references: [id])
-  product Product @relation(fields: [productId], references: [id])
+  order             Order               @relation(fields: [orderId], references: [id])
+  product           Product             @relation(fields: [productId], references: [id])
+  OrderItemModifier OrderItemModifier[]
 }
 
 model Payment {
-  id               String        @id @default(uuid())
-  orderId          String        @unique
-  userId           String
-  amount           Decimal       @db.Decimal(18, 2)
-  status           PaymentStatus @default(pending)
-  paymentMethod    String?
+  id      String        @id @default(uuid())
+  orderId String        @unique
+  userId  String
+  amount  Decimal       @db.Decimal(18, 2)
+  status  PaymentStatus @default(pending)
+
+  paymentMethod String? // azampay, huria_card, wallet
+
   transactionRef   String?
-  idempotencyKey   String?       @unique
-  gatewayReference String?       @unique
-  metadata         Json?
-  failureReason    String?
-  completedAt      DateTime?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  idempotencyKey   String? @unique
+  gatewayReference String? @unique
+
+  metadata      Json?
+  failureReason String?
+
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   // Relations
-  order        Order         @relation(fields: [orderId], references: [orderId])
+  order        Order         @relation(fields: [orderId], references: [id])
   user         User          @relation(fields: [userId], references: [id])
   refunds      Refund[]
   transactions Transaction[]
 
   @@index([userId, createdAt])
-  @@index([orderId])
   @@index([idempotencyKey])
-  @@index([status, createdAt])
-  @@index([gatewayReference])
+  @@index([status, createdAt]) // Composite for status + time queries
+  @@index([status]) // For filtering by status
+  @@index([orderId]) // For looking up payment by order
+  @@index([userId]) // For user payment history
+  @@index([completedAt]) // For date range queries
+  @@index([gatewayReference]) // For webhook lookups 
 }
 
 model Refund {
@@ -420,6 +882,7 @@ model Transaction {
 model Withdrawal {
   id          String           @id @default(uuid())
   driverId    String
+  requestId   String           @unique
   amount      Decimal
   status      WithdrawalStatus @default(pending)
   phone       String?
@@ -461,7 +924,7 @@ model Escrow {
   releasedAt DateTime?
 
   // Relations
-  order           Order            @relation(fields: [orderId], references: [orderId])
+  order           Order            @relation(fields: [orderId], references: [id])
   escrowMerchants EscrowMerchant[]
 }
 
@@ -483,13 +946,15 @@ model EscrowMerchant {
 }
 
 model MerchantWallet {
-  id             String   @id @default(uuid())
-  merchantId     String   @unique
-  balance        Decimal  @default(0)
-  pendingBalance Decimal  @default(0)
-  totalEarned    Decimal  @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String    @id @default(uuid())
+  merchantId       String    @unique
+  balance          Decimal   @default(0) @db.Decimal(18, 2)
+  pendingBalance   Decimal   @default(0) @db.Decimal(18, 2)
+  totalWithdrawn   Decimal   @default(0) @db.Decimal(18, 2)
+  totalEarned      Decimal   @default(0) @db.Decimal(18, 2)
+  lastWithdrawalAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Relations
   merchant     Merchant              @relation(fields: [merchantId], references: [id])
@@ -498,31 +963,54 @@ model MerchantWallet {
 }
 
 model MerchantTransaction {
-  id          String   @id @default(uuid())
-  walletId    String
-  amount      Decimal  @db.Decimal(18, 2)
-  type        String // credit | debit
-  orderId     String
-  status      String // pending | completed | failed
-  description String?
-  createdAt   DateTime @default(now())
+  id           String   @id @default(uuid())
+  walletId     String
+  amount       Decimal  @db.Decimal(18, 2)
+  type         String // credit, debit, withdrawal
+  orderId      String
+  withdrawalId String?
+  status       String   @default("pending") // pending, completed, failed
+  description  String?
+  reference    String?  @unique
+  createdAt    DateTime @default(now())
 
   // Relations
-  wallet MerchantWallet @relation(fields: [walletId], references: [id])
+  wallet     MerchantWallet      @relation(fields: [walletId], references: [id])
+  withdrawal MerchantWithdrawal? @relation(fields: [withdrawalId], references: [id])
+
+  @@index([walletId])
+  @@index([orderId])
+  @@index([createdAt])
 }
 
 model MerchantWithdrawal {
-  id          String           @id @default(uuid())
-  walletId    String
-  amount      Decimal          @db.Decimal(18, 2)
-  phone       String
-  status      WithdrawalStatus @default(pending)
-  reference   String?          @unique
-  createdAt   DateTime         @default(now())
-  processedAt DateTime?
+  id              String           @id @default(uuid())
+  merchantId      String
+  walletId        String
+  amount          Decimal          @db.Decimal(18, 2)
+  phoneNumber     String // Mobile money number for payout
+  accountName     String? // Bank account name (if bank transfer)
+  accountNumber   String? // Bank account number
+  bankName        String? // Bank name
+  paymentMethod   String           @default("mobile_money") // mobile/bank_transfer
+  status          WithdrawalStatus @default(pending)
+  rejectionReason String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  processedAt     DateTime?
+  reference       String?          @unique
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   // Relations
-  wallet MerchantWallet @relation(fields: [walletId], references: [id])
+  wallet              MerchantWallet        @relation(fields: [walletId], references: [id])
+  merchant            Merchant              @relation(fields: [merchantId], references: [id])
+  MerchantTransaction MerchantTransaction[]
+
+  @@index([merchantId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model PushToken {
@@ -678,8 +1166,10 @@ model Subscription {
   paymentMethod           String?
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
+  metadata                Json?
   SubscriptionTransaction SubscriptionTransaction[]
 
+  @@unique([userId, status])
   @@index([userId, status])
   @@index([userId])
   @@index([status, endDate])
@@ -697,6 +1187,53 @@ model UserPromotion {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+model PromoCode {
+  id             String   @id @default(uuid())
+  code           String   @unique
+  type           String // admin, merchant, seasonal, flash_sale, welcome
+  discountType   String   @default("percentage") // percentage or fixed
+  discountValue  Int
+  minOrderAmount Decimal? @db.Decimal(18, 2)
+  maxDiscount    Decimal? @db.Decimal(18, 2)
+  usageLimit     Int?
+  usagePerUser   Int      @default(1)
+  merchantId     String?
+  startDate      DateTime
+  endDate        DateTime
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  merchant Merchant?    @relation(fields: [merchantId], references: [id])
+  usages   PromoUsage[]
+
+  @@index([code])
+  @@index([type])
+  @@index([merchantId])
+  @@index([startDate, endDate])
+  @@index([isActive])
+}
+
+model PromoUsage {
+  id             String   @id @default(uuid())
+  promoId        String
+  userId         String
+  orderId        String
+  discountAmount Decimal  @db.Decimal(18, 2)
+  usedAt         DateTime @default(now())
+
+  // Relations
+  promo PromoCode @relation(fields: [promoId], references: [id])
+  user  User      @relation(fields: [userId], references: [id])
+  order Order     @relation(fields: [orderId], references: [orderId])
+
+  @@unique([promoId, userId]) // One usage per user per promo
+  @@index([userId])
+  @@index([promoId])
+  @@index([orderId])
 }
 
 model SubscriptionTransaction {
@@ -748,12 +1285,18 @@ model AgreementSignature {
 
 model WebhookEvent {
   id          String    @id @default(uuid())
-  provider    String
-  eventId     String    @unique
-  payload     Json?
-  processedAt DateTime?
-  status      String    @default("pending")
+  provider    String // mpesa, tigo, tips, airtel
+  eventId     String    @unique // CheckoutRequestID from M-Pesa
+  payload     Json? // Raw webhook payload
+  processedAt DateTime? // When we processed it
+  status      String    @default("pending") // pending, processing, processed, failed
   createdAt   DateTime  @default(now())
+
+  // ========== INDEXES ==========
+  @@index([eventId]) // Fast lookup by event ID
+  @@index([status]) // Find pending/failed webhooks
+  @@index([createdAt]) // Time-based queries
+  @@index([provider, status]) // Filter by provider and status
 }
 
 model Review {
@@ -799,4 +1342,1013 @@ model DriverMission {
   driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   @@unique([driverId, missionId])
+}
+
+model SystemSettings {
+  id                      String   @id @default("default")
+  platformName            String   @default("HURIA Delivery")
+  platformFeePercentage   Int      @default(20)
+  minDeliveryFee          Int      @default(2000)
+  maxDeliveryFee          Int      @default(10000)
+  freeDeliveryThreshold   Int      @default(50000)
+  currency                String   @default("TZS")
+  maintenanceMode         Boolean  @default(false)
+  driverAutoAssignEnabled Boolean  @default(true)
+  maxDriverDistance       Int      @default(5)
+  autoBackupEnabled       Boolean  @default(true)
+  autoBackupTime          String   @default("02:00")
+  adminAlertPhones        String[] @default([])
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
+model Backup {
+  id        String   @id @default(uuid())
+  filename  String
+  size      Int
+  type      String // manual, auto
+  status    String   @default("completed")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  name        String
+  key         String    @unique // Hashed key
+  permissions String[]  @default(["read"])
+  status      String    @default("active") // active, revoked
+  lastUsed    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([key])
+  @@index([status])
+}
+
+model SupportTicket {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  subject   String
+  status    String   @default("open") // open, in_progress, resolved
+  priority  String   @default("medium") // low, medium, high
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages SupportMessage[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SupportMessage {
+  id        String        @id @default(uuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id])
+  senderId  String
+  sender    User          @relation(fields: [senderId], references: [id])
+  message   String
+  isAdmin   Boolean       @default(false)
+  createdAt DateTime      @default(now())
+
+  @@index([ticketId])
+}
+
+// Role Management System
+model userRole {
+  id          String   @id @default(uuid())
+  name        String   @unique // Super Admin, Finance Admin, Support Admin, Viewer
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions Permission[]
+  users       User[]
+}
+
+model Permission {
+  id         String   @id @default(uuid())
+  name       String // full_access, read_only, revenue, withdrawals, analytics, users, disputes, orders
+  userRoleId String
+  userRole   userRole @relation(fields: [userRoleId], references: [id])
+
+  @@unique([userRoleId, name])
+}
+
+model HuriaCard {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Card details
+  cardNumber String  @unique // e.g., HURIA-XXXX-XXXX
+  cardName   String  @default("HURIA Card")
+  balance    Decimal @default(0) @db.Decimal(18, 2)
+  version    Int     @default(0)
+
+  // HCoins (1 HCoin = 100 TZS)
+  hcoins Int @default(0)
+
+  // Transaction limits
+  dailyLimit    Decimal  @default(500000) @db.Decimal(18, 2)
+  monthlyLimit  Decimal  @default(5000000) @db.Decimal(18, 2)
+  dailySpent    Decimal  @default(0) @db.Decimal(18, 2)
+  monthlySpent  Decimal  @default(0) @db.Decimal(18, 2)
+  lastResetDate DateTime @default(now())
+
+  // Features
+  cashbackRate      Float     @default(2.0) // 2% cashback on purchases
+  discountRate      Float     @default(0) // Extra discount for card users
+  isActive          Boolean   @default(true)
+  isLocked          Boolean   @default(false)
+  lastTransactionAt DateTime?
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  CardTransaction CardTransaction[]
+
+  @@index([userId])
+  @@index([cardNumber])
+}
+
+model HCoinTransaction {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  amount      Int // Number of HCoins
+  type        String // purchase, bonus, cashback, refund
+  description String?
+  reference   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model CardTransaction {
+  id     String    @id @default(uuid())
+  cardId String
+  card   HuriaCard @relation(fields: [cardId], references: [id])
+
+  amount          Decimal             @db.Decimal(18, 2)
+  type            CardTransactionType // purchase, topup, refund
+  description     String?
+  orderId         String?
+  reference       String?             @unique
+  hcoinsEarned    Int                 @default(0)
+  cashbackAmount  Decimal             @default(0) @db.Decimal(18, 2)
+  status          String              @default("pending") // pending, completed, failed 
+  gatewayVerified Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  expiresAt       DateTime?
+  updatedAt       DateTime            @updatedAt
+
+  metadata Json?
+
+  @@index([cardId])
+  @@index([orderId])
+}
+
+// ✅ New Model: Operating Hours for Restaurants/Supermarkets
+model OperatingHours {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  dayOfWeek  Int // 0-6 (Sunday-Saturday)
+  opensAt    String // "09:00"
+  closesAt   String // "22:00"
+  isClosed   Boolean  @default(false)
+  isSpecial  Boolean  @default(false) // Holiday hours
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([merchantId, dayOfWeek])
+  @@index([merchantId])
+}
+
+// ✅ New Model: Delivery Zones (GeoJSON for advanced zoning)
+model DeliveryZone {
+  id             String   @id @default(uuid())
+  merchantId     String
+  merchant       Merchant @relation(fields: [merchantId], references: [id])
+  name           String // "Downtown", "Suburbs", "Airport Area"
+  polygon        Json? // GeoJSON polygon
+  minDeliveryFee Decimal  @default(0) @db.Decimal(10, 2)
+  maxRadiusKm    Float
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([merchantId])
+  @@index([isActive])
+}
+
+// ✅ New Model: Store Reviews
+model StoreReview {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  rating     Float // 1-5
+  comment    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([merchantId, userId])
+  @@index([merchantId])
+  @@index([rating])
+}
+
+// ✅ New Model: Order Modifiers (for restaurant add-ons)
+model OrderItemModifier {
+  id          String    @id @default(uuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+  name        String
+  price       Decimal   @db.Decimal(10, 2)
+  quantity    Int       @default(1)
+
+  @@index([orderItemId])
+}
+
+// ✅ New Model: Driver Dispatch Queue
+model DriverDispatchQueue {
+  id               String    @id @default(uuid())
+  orderId          String    @unique
+  order            Order     @relation(fields: [orderId], references: [id])
+  merchantId       String
+  merchant         Merchant  @relation(fields: [merchantId], references: [id])
+  priority         Int       @default(1) // 1=highest
+  radiusKm         Float     @default(5)
+  assignedDriverId String?
+  dispatchedAt     DateTime?
+  status           String    @default("pending") // pending, searching, assigned, failed
+  retryCount       Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status, priority])
+  @@index([merchantId])
+  @@index([createdAt])
+}
+
+model ManualDispatchQueue {
+  id           String    @id @default(uuid())
+  orderId      String    @unique
+  merchantId   String
+  merchantType String // RESTAURANT or SUPERMARKET
+  status       String    @default("pending") // pending, assigned, failed
+  assignedTo   String?
+  assignedAt   DateTime?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  order Order @relation(fields: [orderId], references: [orderId])
+
+  @@index([status])
+  @@index([merchantId])
+  @@index([createdAt])
+}
+
+model AdminEscalationQueue {
+  id            String    @id @default(uuid())
+  orderId       String    @unique
+  merchantId    String
+  merchantName  String?
+  merchantPhone String?
+  reason        String // merchant_not_responding, payment_issue, etc.
+  status        String    @default("pending") // pending, merchant_contacted, urgent, resolved
+  adminNotes    String?
+  contactedAt   DateTime?
+  contactedBy   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model UrgentAdminTasks {
+  id         String    @id @default(uuid())
+  orderId    String    @unique
+  type       String // merchant_no_response, driver_issue, payment_issue
+  priority   String    @default("HIGH") // HIGH, MEDIUM, LOW
+  status     String    @default("pending") // pending, in_progress, resolved
+  assignedTo String?
+  resolvedAt DateTime?
+  resolvedBy String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([status, priority])
+  @@index([createdAt])
+}
+
+model PendingReassignments {
+  id               String    @id @default(uuid())
+  orderId          String    @unique
+  newMerchantId    String
+  missingItems     Json
+  status           String    @default("awaiting_customer_approval")
+  customerResponse String?
+  respondedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DriverKYC {
+  id       String @id @default(uuid())
+  driverId String @unique
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  // Personal Information
+  nidaNumber  String?
+  fullName    String?
+  dateOfBirth DateTime?
+
+  // Documents
+  licenseCardImage String? // URL to uploaded license card image
+  nidaCardImage    String? // URL to NIDA card image (optional)
+  passportPhoto    String? // URL to passport photo or selfie
+  selfieImage      String? // Selfie image for face verification
+
+  // Vehicle Information
+  licenseNumber String?
+  plateNumber   String?
+  vehicleType   String?
+
+  // Verification Status
+  kycStatus       KYCStatus @default(NOT_SUBMITTED)
+  rejectionReason String?
+  verifiedBy      String?
+  verifiedAt      DateTime?
+  submittedAt     DateTime?
+  frozenAt        DateTime?
+  unfrozenAt      DateTime?
+
+  // Tracking
+  verificationAttempts    Int       @default(0)
+  lastVerificationRequest DateTime?
+  notes                   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kycStatus])
+  @@index([driverId])
+  @@index([frozenAt])
+}
+
+// Merchant KYC Verification
+model MerchantKYC {
+  id         String   @id @default(uuid())
+  merchantId String   @unique
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+
+  // Personal Information
+  nidaNumber                 String?
+  fullName                   String?
+  dateOfBirth                DateTime?
+  businessRegistrationNumber String?
+
+  // Documents
+  nidaCardImage        String? // URL to NIDA card image
+  passportPhoto        String? // URL to passport photo or selfie
+  selfieImage          String? // Selfie image
+  businessLicenseImage String? // Business registration document
+  logoImage            String? // Store logo/image
+
+  // Business Information
+  businessAddress String?
+  businessLat     Float?
+  businessLng     Float?
+
+  // Verification Status
+  kycStatus       KYCStatus @default(NOT_SUBMITTED)
+  rejectionReason String?
+  verifiedBy      String?
+  verifiedAt      DateTime?
+  submittedAt     DateTime?
+  frozenAt        DateTime?
+  unfrozenAt      DateTime?
+
+  // Tracking
+  verificationAttempts    Int       @default(0)
+  lastVerificationRequest DateTime?
+  notes                   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kycStatus])
+  @@index([merchantId])
+  @@index([frozenAt])
+}
+
+// KYC Audit Log
+model KYCAuditLog {
+  id        String    @id @default(uuid())
+  userId    String
+  userType  String // DRIVER or MERCHANT
+  action    String // SUBMIT, APPROVE, REJECT, FREEZE, UNFREEZE
+  status    KYCStatus
+  reason    String?
+  adminId   String?
+  metadata  Json?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+// User Frozen Record (for cleanup job)
+model FrozenUser {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  userType  String // DRIVER or MERCHANT
+  frozenAt  DateTime  @default(now())
+  reason    String?
+  expiresAt DateTime? // When freeze expires (optional)
+
+  @@index([frozenAt])
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  ip        String?
+  device    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Social - Posts (Global Feed)
+model SocialPost {
+  id String @id @default(uuid())
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  caption String?
+
+  visibility PrivacyLevel @default(PUBLIC)
+
+  likesCount    Int @default(0)
+  commentsCount Int @default(0)
+  sharesCount   Int @default(0)
+  savesCount    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deletedAt DateTime?  // For soft delete
+
+  media      SocialPostMedia[]
+  comments   SocialComment[]
+  likes      SocialPostLike[]
+  hashtags   PostHashtag[]
+  mentions   PostMention[]
+  savedPosts SavedPost[]
+  shares     PostShare[]
+
+  isEdited      Boolean @default(false)
+  allowComments Boolean @default(true)
+  allowSharing  Boolean @default(true)
+  location      String?
+  createdFrom   String? // ios, android, web
+
+  @@index([createdAt])
+  @@index([authorId])
+  @@index([visibility])
+  @@index([likesCount])
+  @@index([commentsCount])
+}
+
+// Social - Connections (Follow system)
+model Follow {
+  id String @id @default(uuid())
+
+  followerId  String
+  followingId String
+
+  follower  User @relation("FollowerRelation", fields: [followerId], references: [id])
+  following User @relation("FollowingRelation", fields: [followingId], references: [id])
+
+  status    FollowStatus @default(ACCEPTED)
+  createdAt DateTime     @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model SocialProfile {
+  id String @id @default(uuid())
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  username   String  @unique
+  bio        String?
+  website    String?
+  location   String?
+  profession String?
+
+  verified       Boolean @default(false)
+  followersCount Int     @default(0)
+  followingCount Int     @default(0)
+  postsCount     Int     @default(0)
+  storiesCount   Int     @default(0)
+  profileViews   Int     @default(0)
+
+  privacy PrivacyLevel @default(PUBLIC)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reels      Reel[]
+  savedPosts SavedPost[]
+}
+
+model UserBlock {
+  id String @id @default(uuid())
+
+  blockerId String
+  blockedId String
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id])
+  blocked User @relation("Blocked", fields: [blockedId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model SocialPostMedia {
+  id String @id @default(uuid())
+
+  postId String
+  post   SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  url      String
+  type     String
+  width    Int?
+  height   Int?
+  duration Int?
+
+  createdAt DateTime @default(now())
+}
+
+model SocialPostLike {
+  id String @id @default(uuid())
+
+  postId   String
+  userId   String
+  reaction ReactionType @default(LIKE)
+
+  post SocialPost @relation(fields: [postId], references: [id])
+  user User       @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model SocialComment {
+  id String @id @default(uuid())
+
+  postId   String
+  userId   String
+  parentId String?
+
+  post   SocialPost     @relation(fields: [postId], references: [id])
+  user   User           @relation(fields: [userId], references: [id])
+  parent SocialComment? @relation("CommentReplies", fields: [parentId], references: [id])
+
+  replies SocialComment[] @relation("CommentReplies") // This was missing
+
+  content    String
+  likesCount Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([postId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model SavedPost {
+  id String @id @default(uuid())
+
+  socialProfileId String
+  postId          String
+
+  socialProfile SocialProfile @relation(fields: [socialProfileId], references: [userId])
+  post          SocialPost    @relation(fields: [postId], references: [id])
+
+  createdAt DateTime @default(now())
+  User      User?    @relation(fields: [userId], references: [id])
+  userId    String?
+
+  @@unique([socialProfileId, postId])
+  @@index([socialProfileId])
+  @@index([postId])
+}
+
+model SocialStory {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  mediaUrl  String
+  mediaType String
+  caption   String?
+  expiresAt DateTime
+
+  viewsCount Int @default(0)
+  likesCount Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  views   StoryView[]
+  likes   StoryReaction[]
+  replies StoryReply[]
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model StoryView {
+  id String @id @default(uuid())
+
+  storyId  String
+  viewerId String
+
+  story  SocialStory @relation(fields: [storyId], references: [id])
+  viewer User        @relation(fields: [viewerId], references: [id])
+
+  viewedAt DateTime @default(now())
+
+  @@unique([storyId, viewerId])
+}
+
+model StoryReaction {
+  id String @id @default(uuid())
+
+  storyId  String
+  userId   String
+  reaction ReactionType
+
+  story SocialStory @relation(fields: [storyId], references: [id])
+  user  User        @relation(fields: [userId], references: [id])
+
+  @@unique([storyId, userId])
+  @@index([storyId])
+  @@index([userId])
+}
+
+model Reel {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  videoUrl     String
+  thumbnailUrl String?
+  caption      String?
+  duration     Int
+
+  viewsCount    Int @default(0)
+  likesCount    Int @default(0)
+  commentsCount Int @default(0)
+  sharesCount   Int @default(0)
+
+  visibility      PrivacyLevel @default(PUBLIC)
+  thumbnailWidth  Int?
+  thumbnailHeight Int?
+
+  allowComments  Boolean @default(true)
+  allowDownloads Boolean @default(false)
+  allowDuets     Boolean @default(true)
+  allowStitch    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  reelsMedia    ReelMedia[]
+  reelsLikes    ReelLike[]
+  reelsComments ReelComment[]
+  reelsViews    ReelView[]
+
+  socialProfile   SocialProfile? @relation(fields: [socialProfileId], references: [id])
+  socialProfileId String?
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([viewsCount])
+}
+
+model ReelMedia {
+  id String @id @default(uuid())
+
+  reelId String
+  reel   Reel   @relation(fields: [reelId], references: [id])
+
+  url      String
+  type     String
+  duration Int?
+  width    Int?
+  height   Int?
+}
+
+model ReelLike {
+  id String @id @default(uuid())
+
+  reelId   String
+  userId   String
+  reaction ReactionType @default(LIKE)
+
+  reel Reel @relation(fields: [reelId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([reelId, userId])
+  @@index([reelId])
+  @@index([userId])
+}
+
+model ReelComment {
+  id String @id @default(uuid())
+
+  reelId   String
+  userId   String
+  parentId String?
+  content  String
+
+  reel    Reel          @relation(fields: [reelId], references: [id])
+  user    User          @relation(fields: [userId], references: [id])
+  parent  ReelComment?  @relation("ReelCommentReplies", fields: [parentId], references: [id])
+  replies ReelComment[] @relation("ReelCommentReplies")
+
+  createdAt DateTime @default(now())
+
+  @@index([reelId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ReelView {
+  id String @id @default(uuid())
+
+  reelId String
+  userId String?
+
+  watchTime Int     @default(0)
+  completed Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  reel   Reel  @relation(fields: [reelId], references: [id])
+  viewer User? @relation(fields: [userId], references: [id])
+
+  @@index([reelId])
+  @@index([userId])
+}
+
+model Conversation {
+  id String @id @default(uuid())
+
+  type     ConversationType
+  title    String?
+  imageUrl String?
+
+  lastMessageId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members  ConversationMember[]
+  messages Message[]
+
+  lastMessage Message? @relation("LastConversationMessage", fields: [lastMessageId], references: [id])
+}
+
+model ConversationMember {
+  id String @id @default(uuid())
+
+  conversationId String
+  userId         String
+
+  isAdmin  Boolean  @default(false)
+  joinedAt DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id String @id @default(uuid())
+
+  conversationId String
+  senderId       String
+
+  type    MessageType
+  content String?
+
+  isEdited  Boolean @default(false)
+  isDeleted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  conversation            Conversation  @relation(fields: [conversationId], references: [id])
+  sender                  User          @relation(fields: [senderId], references: [id])
+  lastMessageConversation Conversation? @relation("LastConversationMessage")
+
+  attachments MessageAttachment[]
+  reads       MessageRead[]
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model MessageAttachment {
+  id String @id @default(uuid())
+
+  messageId String
+  url       String
+  type      String
+  size      Int?
+  duration  Int?
+  width     Int?
+  height    Int?
+
+  message Message @relation(fields: [messageId], references: [id])
+}
+
+model MessageRead {
+  id String @id @default(uuid())
+
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
+}
+
+model SocialNotification {
+  id String @id @default(uuid())
+
+  userId  String
+  actorId String?
+
+  type     NotificationType
+  title    String
+  body     String?
+  entityId String?
+
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+model Hashtag {
+  id String @id @default(uuid())
+
+  name       String @unique
+  usageCount Int    @default(0)
+
+  posts PostHashtag[]
+}
+
+model PostHashtag {
+  id String @id @default(uuid()) // Added id field
+
+  postId    String
+  hashtagId String
+
+  post    SocialPost @relation(fields: [postId], references: [id])
+  hashtag Hashtag    @relation(fields: [hashtagId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, hashtagId])
+  @@index([postId])
+  @@index([hashtagId])
+}
+
+model PostMention {
+  id String @id @default(uuid())
+
+  postId          String
+  mentionedUserId String
+
+  post          SocialPost @relation(fields: [postId], references: [id])
+  mentionedUser User       @relation(fields: [mentionedUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+  @@index([mentionedUserId])
+}
+
+model SocialSearchHistory {
+  id String @id @default(uuid())
+
+  userId    String
+  query     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model TrendingContent {
+  id String @id @default(uuid())
+
+  entityType   String
+  entityId     String
+  score        Float
+  calculatedAt DateTime @default(now())
+
+  @@index([score])
+}
+
+model UserPresence {
+  userId String @id
+
+  user User @relation(fields: [userId], references: [id])
+
+  isOnline  Boolean   @default(false)
+  lastSeen  DateTime?
+  updatedAt DateTime  @updatedAt
+}
+
+model PostShare {
+  id String @id @default(uuid())
+
+  userId String
+  postId String
+
+  user User       @relation(fields: [userId], references: [id])
+  post SocialPost @relation(fields: [postId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+}
+
+model StoryReply {
+  id String @id @default(uuid())
+
+  storyId    String
+  senderId   String
+  receiverId String
+
+  message   String
+  createdAt DateTime @default(now())
+
+  story    SocialStory @relation(fields: [storyId], references: [id])
+  sender   User        @relation("StoryReplySender", fields: [senderId], references: [id])
+  receiver User        @relation("StoryReplyReceiver", fields: [receiverId], references: [id])
+
+  @@index([storyId])
+  @@index([senderId])
+  @@index([receiverId])
 }

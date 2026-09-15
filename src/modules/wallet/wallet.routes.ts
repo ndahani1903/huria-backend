@@ -3,7 +3,8 @@ import { WalletController } from "./wallet.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { 
   rateLimitMiddleware, 
-  authRateLimiter, 
+  authRateLimiter,
+  apiRateLimiter, 
   paymentRateLimiter 
 } from "../../middleware/rateLimit.middleware";
 
@@ -13,7 +14,7 @@ const router = Router();
 router.get(
   "/", 
   authMiddleware, 
-  rateLimitMiddleware,  // Prevent excessive wallet polling
+  apiRateLimiter,  // Prevent excessive wallet polling
   WalletController.getWallet
 );
 

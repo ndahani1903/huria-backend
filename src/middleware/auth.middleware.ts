@@ -82,3 +82,27 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     return res.status(401).json({ error: "Invalid token" });
   }
 };
+
+export const requirePermission = (permission: string) => {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { 
+        customRole: { 
+          include: { permissions: true }
+        }
+      }
+    });
+    
+    const rolePermissions = user?.customRole?.permissions.map(p => p.name) || [];
+    const hasPermission = rolePermissions.includes('full_access') || rolePermissions.includes(permission);
+    
+    if (!hasPermission) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    
+    next();
+  };
+};

@@ -1,3 +1,5 @@
+// src/modules/auth/auth.service.ts
+
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
@@ -14,7 +16,7 @@ import {
 export class AuthService {
   static async register(data: any, isPasswordPreHashed: boolean = false) {
    const { role, password, name, email, phone: phoneInput,
-        businessName, businessType,
+        businessName, businessType, merchantType, 
         pickupAddress, pickupLat, pickupLng, licenseNumber, nidaNumber, vehicleType, vehiclePlate } = data;
    
    // ✅ Validate required fields
@@ -64,12 +66,28 @@ export class AuthService {
         password: hashedPassword,
         role: role as Role,
         verifyToken,
-        verifyTokenExpires: new Date(Date.now() + 1000 * 60 * 60 * 24)
+        verifyTokenExpires: new Date(Date.now() + 1000 * 60 * 60 * 24),
+        phoneVerified: false,
+      phoneOTP: null,
+      phoneOTPExpiresAt: null,
+      phoneOTPAttempts: 0
       },
     });
 
     let merchantId = null;
     let driverId = null;
+    let savedMerchantType = null; 
+
+
+    // ✅ Send OTP after registration
+  try {
+    const { OTPService } = await import('../../services/otp.service');
+    await OTPService.sendPhoneOTP(user.id, phone);
+    console.log(`📱 OTP sent to ${phone} for user ${user.id}`);
+  } catch (otpError) {
+    console.error('Failed to send OTP:', otpError);
+    // Don't fail registration if OTP fails
+  }
 
     if (role === "merchant") {
       const merchant = await prisma.merchant.create({
@@ -79,6 +97,7 @@ export class AuthService {
           phone,
           businessName,
           businessType,
+          merchantType: merchantType || "GENERAL_ECOMMERCE",
 
           // ✅ SAVE PICKUP LOCATION
           pickupAddress,
@@ -89,6 +108,7 @@ export class AuthService {
       });
 
       merchantId = merchant.id;
+      savedMerchantType = merchant.merchantType;
     }
 
     if (role === "driver") {
@@ -137,7 +157,8 @@ export class AuthService {
         name: user.name,
         email: user.email,
         phone: user.phone,
-        role: user.role
+        role: user.role,
+        merchantType: savedMerchantType 
       },
       accessToken,
       refreshToken,
@@ -188,13 +209,16 @@ export class AuthService {
 
     let merchantId = null;
     let driverId = null;
+    let merchantType = null;
 
     if (user.role === "merchant") {
       const merchant = await prisma.merchant.findUnique({
         where: { userId: user.id },
+        select: { id: true, merchantType: true }
       });
 
       merchantId = merchant?.id || null;
+      merchantType = merchant?.merchantType || "GENERAL_ECOMMERCE";
     }
 
     if (user.role === "driver") {
@@ -212,7 +236,8 @@ export class AuthService {
      const accessToken = signAccessToken({
       id: user.id,
       role: user.role,
-     driverId: driverId 
+     driverId: driverId,
+      merchantType: merchantType 
     });
 
     const refreshToken = signRefreshToken({
@@ -234,7 +259,8 @@ export class AuthService {
         email: user.email,
         phone: user.phone,
         role: user.role,
-        emailVerified: user.emailVerified
+        emailVerified: user.emailVerified,
+        merchantType: merchantType
       },
       accessToken,
       refreshToken

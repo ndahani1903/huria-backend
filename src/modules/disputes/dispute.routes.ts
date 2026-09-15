@@ -1,3 +1,5 @@
+// src/modules/disputes/dispute.routes.ts
+
 import { Router } from 'express';
 import { DisputeController } from './dispute.controller';
 import { authMiddleware } from "../../middleware/auth.middleware";
@@ -14,7 +16,7 @@ const router = Router();
 router.post('/', 
   authMiddleware, 
   requireRole("customer"),
-  authRateLimiter,  // Prevent spam dispute creation
+  authRateLimiter,
   DisputeController.create
 );
 
@@ -22,7 +24,7 @@ router.post('/',
 router.post('/resolve', 
   authMiddleware, 
   requireRole("admin"),
-  paymentRateLimiter,  //Strict limit 4 resolution (financial impact)
+  paymentRateLimiter,
   DisputeController.resolve
 );
 
@@ -30,25 +32,47 @@ router.post('/resolve',
 router.post('/reject', 
   authMiddleware, 
   requireRole("admin"),
-  paymentRateLimiter,  //Strict limit for rejection (financial impact)
+  paymentRateLimiter,
   DisputeController.reject
 );
 
-/*
-// Optional: Get dispute by ID
+// ✅ NEW: Get all disputes (Admin)
+router.get('/', 
+  authMiddleware, 
+  requireRole("admin"),
+  rateLimitMiddleware,
+  DisputeController.getAll
+);
+
+// ✅ NEW: Get dispute statistics (Admin)
+router.get('/stats', 
+  authMiddleware, 
+  requireRole("admin"),
+  rateLimitMiddleware,
+  DisputeController.getStats
+);
+
+// ✅ NEW: Get dispute by ID (Admin)
 router.get('/:id', 
   authMiddleware, 
+  requireRole("admin"),
   rateLimitMiddleware,
   DisputeController.getById
 );
 
-// Optional: Get all disputes for user/order
+// ✅ NEW: Get disputes by order (Admin/Customer)
 router.get('/order/:orderId', 
   authMiddleware, 
   rateLimitMiddleware,
   DisputeController.getByOrder
 );
 
-*/
+// ✅ NEW: Add note to dispute (Admin)
+router.post('/:id/note', 
+  authMiddleware, 
+  requireRole("admin"),
+  authRateLimiter,
+  DisputeController.addNote
+);
 
 export default router;

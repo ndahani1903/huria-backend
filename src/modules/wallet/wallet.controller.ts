@@ -10,6 +10,14 @@ export class WalletController {
       }
       
       const wallet = await WalletService.getWallet(req.user.id);
+
+     console.log("=================================");
+console.log("USER ID:", req.user.id);
+console.log("WALLET:", wallet);
+console.log("=================================");
+
+      console.log("💰 WALLET RESPONSE:", wallet);
+
       res.json(wallet);
     } catch (error: any) {
       console.error("WALLET ERROR:", error.message); // 👈 ADD THIS

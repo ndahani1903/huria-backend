@@ -10,11 +10,29 @@ import {
 
 const router = Router();
 
+router.get("/test", 
+  authMiddleware, 
+  requireRole("merchant"), 
+  (req, res) => {
+    console.log("✅ Test endpoint hit!");
+    res.json({ success: true, message: "Wallet route is working", timestamp: new Date().toISOString() });
+  }
+);
+
+
 // ✅ WALLET ROUTES
 router.get("/wallet", 
   authMiddleware, 
   requireRole("merchant"), 
-  rateLimitMiddleware,  // Prevent excessive balance checks
+  //rateLimitMiddleware,  // Prevent excessive balance checks
+  MerchantWalletController.getWallet
+);
+
+// ✅ GET balance only (for dashboard)
+router.get("/wallet/balance", 
+  authMiddleware, 
+  requireRole("merchant"), 
+  //rateLimitMiddleware,
   MerchantWalletController.getBalance
 );
 

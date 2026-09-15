@@ -9,6 +9,7 @@ import app from './app';
 import { env } from './config/env';
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient } from "redis";
+import { SocialSocket } from "./modules/social-v2/social.socket";
 import OrderService from "./modules/orders/order.service";
 
 import orderRoutes from './modules/orders/order.routes';
@@ -21,57 +22,80 @@ import withdrawalRoutes from "./modules/withdrawal/withdrawal.routes";
 import productRoutes from './modules/products/product.routes';
 import merchantRoutes from './modules/merchants/merchant.routes';
 import merchantWalletRoutes from './modules/merchants/merchantWallet.routes';
+import merchantTypeRoutes from './modules/merchants/merchantType.routes';
 import investorRoutes from './routes/investor.routes';
 import merchantLendingRoutes from './modules/lending/merchantLending.routes';
 import driverLendingRoutes from './modules/lending/driverLending.routes';
 import merchantTierRoutes from './modules/merchants/tiers.routes';
+import merchantWithdrawalRoutes from './modules/merchants/merchantWithdrawal.routes';
 import subscriptionRoutes from './modules/subscription/subscription.routes';
-import './jobs/subscriptionRenewal.job'; // Start the cron job
-import './jobs/gamificationReset.job';
-import './jobs/tierEvaluation.job';
+import userRoutes from "./modules/users/user.routes";
+import reviewRoutes from './modules/reviews/review.routes';
+import notificationSettingsRoutes from './modules/notifications/notificationSettings.routes';
+import testNotificationRoutes from './modules/notifications/testNotification.routes';
+
+import logisticsRoutes from './routes/logistics.routes';
 import forecastRoutes from './routes/forecast.routes';
 import legalRoutes from './routes/legal.routes';
 import coPilotRoutes from './routes/copilot.routes';
 import addressRoutes from './routes/address.routes';
-import userRoutes from "./modules/users/user.routes";
-import reviewRoutes from './modules/reviews/review.routes';
 import signatureRoutes from './routes/signature.routes';
-import notificationSettingsRoutes from './modules/notifications/notificationSettings.routes';
-import testNotificationRoutes from './modules/notifications/testNotification.routes';
 
+import socialRoutes from './modules/social-v2/social.routes';
+
+import './jobs/subscriptionRenewal.job'; // Start the cron job
+import './jobs/gamificationReset.job';
+import './jobs/tierEvaluation.job';
+import './jobs/webhookRetry.job';
+import { CleanupService } from './services/cleanup.service';
+import './jobs/staleAssignmentCleanup.job';
+import kycRoutes from './routes/kyc.routes';
+
+CleanupService.startCleanupSchedule();
 const httpServer = http.createServer(app);
 const lastLogTime: Record<string, number> = {};
 
-app.use('/api/orders', orderRoutes);
-app.use('/api/drivers', driverRoutes);
-app.use('/api/disputes', disputeRoutes);
-app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/auth", authRoutes);
+app.use('/api/disputes', disputeRoutes);
+app.use('/legal', legalRoutes);
+app.use('/api/investor', investorRoutes);
+app.use('/api/signatures', signatureRoutes);
+app.use('/api/kyc', kycRoutes);
+
+app.use('/api/drivers', driverRoutes);
+app.use('/api/drivers/lending', driverLendingRoutes);
+app.use('/api/copilot', coPilotRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/withdrawals", withdrawalRoutes);
+app.use('/api/logistics', logisticsRoutes);
+
+app.use('/api/orders', orderRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/merchants', merchantRoutes);
 app.use('/api/merchants', merchantWalletRoutes);
-app.use('/api/investor', investorRoutes);
+app.use('/api/merchants/withdrawal', merchantWithdrawalRoutes);
 app.use('/api/merchants/lending', merchantLendingRoutes);
-app.use('/api/drivers/lending', driverLendingRoutes);
 app.use('/api/merchant/tier', merchantTierRoutes);
-app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/merchants', merchantTypeRoutes);
 app.use('/api/forecast', forecastRoutes);
-app.use('/legal', legalRoutes);
-app.use('/api/copilot', coPilotRoutes);
+
+app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use("/api/users", userRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/users', notificationSettingsRoutes);
 app.use('/api/test', testNotificationRoutes);
-app.use('/api/signatures', signatureRoutes);
+
+app.use('/api/social/v2', socialRoutes);
 
 export const io = new Server(httpServer, {
   cors: {
     origin: "*"
   }
 });
+
+SocialSocket.initialize(io);
 
 let pubClient: any;
 let subClient: any;
@@ -270,4 +294,20 @@ const PORT = parseInt(env.PORT as string) || 5000;
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Local: http://localhost:${PORT}`);
+  console.log(`Network: http://${getLocalIP()}:${PORT}`);
 });
+
+// Helper to get local IP
+function getLocalIP() {
+  const { networkInterfaces } = require('os');
+  const nets = networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return 'localhost';
+}

@@ -1,3 +1,5 @@
+// src/modules/withdrawal/withdrawal.service.ts
+
 import { prisma } from "../../config/db";
 import { SMSService } from "../../services/sms.service";
 import { createAuditLog } from "../admin/audit.service";
@@ -23,11 +25,29 @@ export class WithdrawalService {
        throw new Error("Insufficient balance");
     }
 
+   // Prevent duplicate pending withdrawals
+const existingPending = await prisma.withdrawal.findFirst({
+  where: {
+    driverId,
+    status: 'pending'
+  }
+});
+
+if (existingPending) {
+  throw new Error('You already have a pending withdrawal request');
+}
+
+// Minimum withdrawal
+const MIN_WITHDRAWAL = 1000;
+if (amount < MIN_WITHDRAWAL) {
+  throw new Error(`Minimum withdrawal is ${MIN_WITHDRAWAL}`);
+}
+
     const withdrawal = await prisma.$transaction(async (tx) => {
       await tx.wallet.update({
         where: { id: driver.wallet!.id },
         data: {
-          balance: toNumber(driver.wallet!.balance) - amount
+           balance: { decrement: amount }
         }
       });
 

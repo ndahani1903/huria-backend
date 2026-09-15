@@ -1,5 +1,8 @@
+// src/modules/auth/auth.controller.ts
+
 import { Request, Response } from "express";
 import { AuthService } from "./auth.service";
+import { OTPService } from '../../services/otp.service';
 import crypto from "crypto";
 import bcrypt from "bcrypt";
 import { prisma } from "../../config/db";
@@ -67,6 +70,69 @@ export class AuthController {
       req.body.password
     );
     res.json({ success: true });
+  };
+
+
+  // Send OTP for phone verification
+  static sendOTP = async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { phone: true, phoneVerified: true }
+      });
+      
+      if (!user) throw new Error('User not found');
+      if (user.phoneVerified) {
+        return res.status(400).json({ error: 'Phone already verified' });
+      }
+      
+      await OTPService.sendPhoneOTP(userId, user.phone);
+      res.json({ 
+        success: true, 
+        message: 'OTP sent to your phone number' 
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  };
+  
+  // Verify OTP
+  static verifyOTP = async (req: AuthRequest, res: Response) => {
+    try {
+      const { otp } = req.body;
+      if (!otp) {
+        return res.status(400).json({ error: 'OTP is required' });
+      }
+      
+      const result = await OTPService.verifyPhoneOTP(req.user.id, otp);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  };
+  
+  // Resend OTP
+  static resendOTP = async (req: AuthRequest, res: Response) => {
+    try {
+      const result = await OTPService.resendOTP(req.user.id);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  };
+  
+  // Check verification status
+  static verificationStatus = async (req: AuthRequest, res: Response) => {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { phoneVerified: true }
+      });
+      res.json({ verified: user?.phoneVerified || false });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
   };
 }
 

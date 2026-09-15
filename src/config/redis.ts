@@ -15,10 +15,18 @@ const redis = redisUrl
       },
       maxRetriesPerRequest: 3,
       connectTimeout: 10000, // 10 second timeout
+      lazyConnect: true, // Don't connect immediately
     })
   : null;
 
 if (redis) {
+  // Connect manually
+  redis.connect().catch((err) => {
+    console.error("❌ Redis connection failed:", err.message);
+    console.log("⚠️ Continuing without Redis - Socket.IO will use memory adapter");
+  });
+
+
   redis.on("connect", () => {
     console.log("🟢 Redis connected");
   });
