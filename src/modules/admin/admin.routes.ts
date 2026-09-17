@@ -1,6 +1,5 @@
 // src/modules/admin/admin.routes.ts
 
-import crypto from 'crypto';
 import { Router, Request, Response } from "express";
 import { prisma } from '../../config/db';
 import { AdminController } from "./admin.controller";
@@ -14,27 +13,38 @@ import {
 } from '../../middleware/rateLimit.middleware';
 import driverGamificationService from '../drivers/gamification.service';
 import redis from '../../config/redis';
+import { DriverAssignmentService } from '../../services/driverAssignment.service';
+import PriorityOrderService from '../orders/priorityOrder.service';
 
 const router = Router();
 
-router.get("/test-bare", (req, res) => {
-  console.log("🔥 BARE BONES TEST HIT!");
-  res.json({ 
-    success: true, 
-    message: "Bare bones test works!",
-    timestamp: new Date().toISOString()
-  });
-});
+const getQueryString = (value: unknown, fallback: string): string => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return fallback;
+};
 
-// ✅ ADD THIS AT THE VERY TOP - BEFORE ANY OTHER ROUTES
-router.get("/simple-test", (req: Request, res: Response) => {
-  console.log("🔥 SIMPLE TEST ROUTE HIT!");
-  res.json({ 
-    success: true, 
-    message: "Admin routes are working!",
-    timestamp: new Date().toISOString()
-  });
-});
+const getParamString = (value: string | string[] | undefined, name: string): string => {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value) && typeof value[0] === "string" && value[0].trim()) return value[0].trim();
+  throw new Error(`Missing ${name}`);
+};
+
+const getPagination = (pageValue: unknown, limitValue: unknown, defaultLimit = 50, maxLimit = 200) => {
+  const page = Math.max(1, Number.parseInt(getQueryString(pageValue, "1"), 10) || 1);
+  const limit = Math.min(maxLimit, Math.max(1, Number.parseInt(getQueryString(limitValue, String(defaultLimit)), 10) || defaultLimit));
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+const getDistanceKmFromMetadata = (metadata: unknown, fallback = 5): number => {
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const value = (metadata as Record<string, unknown>).distanceKm;
+    const distance = Number(value);
+    if (Number.isFinite(distance) && distance >= 0) return distance;
+  }
+  return fallback;
+};
 
 // Keep your existing routes below...
 router.get('/ping-auth', authMiddleware, requireRole('admin'), (req, res) => {
@@ -226,6 +236,7 @@ router.post("/settings",
 router.post("/backup", 
   authMiddleware, 
   requireRole("admin"), 
+  authRateLimiter,
   AdminController.createBackup
 );
 
@@ -244,6 +255,7 @@ router.get("/backup/download/:filename",
 router.post("/restore", 
   authMiddleware, 
   requireRole("admin"), 
+  authRateLimiter,
   AdminController.restoreBackup
 );
 
@@ -257,18 +269,21 @@ router.get("/api-keys",
 router.post("/api-keys", 
   authMiddleware, 
   requireRole("admin"), 
+  authRateLimiter,
   AdminController.createApiKey
 );
 
 router.delete("/api-keys/:id", 
   authMiddleware, 
   requireRole("admin"), 
+  authRateLimiter,
   AdminController.revokeApiKey
 );
 
 router.put("/api-keys/:id", 
   authMiddleware, 
   requireRole("admin"), 
+  authRateLimiter,
   AdminController.updateApiKey
 );
 
@@ -355,7 +370,7 @@ router.get('/active-orders',
       res.json(orders);
     } catch (error: any) {
       console.error('Active orders error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -379,7 +394,7 @@ router.get('/drivers-status',
       res.json({ available, busy });
     } catch (error: any) {
       console.error('Drivers status error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -452,7 +467,7 @@ router.get('/dashboard-stats',
       res.json(stats);
     } catch (error: any) {
       console.error('Dashboard stats error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -503,7 +518,7 @@ router.get('/merchants-locations',
       res.json(formattedMerchants);
     } catch (error: any) {
       console.error('Merchants locations error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -516,9 +531,16 @@ router.post('/assign-driver',
     try {
       const { orderId, driverId } = req.body;
       const adminId = req.user!.id;
+
+      if (typeof orderId !== "string" || !orderId.trim() || typeof driverId !== "string" || !driverId.trim()) {
+        return res.status(400).json({ error: "orderId and driverId are required" });
+      }
+
+      const normalizedOrderId = orderId.trim();
+      const normalizedDriverId = driverId.trim();
       
       const order = await prisma.order.findUnique({
-        where: { orderId },
+        where: { orderId: normalizedOrderId },
         include: { 
           user: true,
           merchant: true 
@@ -534,24 +556,28 @@ router.post('/assign-driver',
       }
       
       const driver = await prisma.driver.findUnique({
-        where: { id: driverId },
+        where: { id: normalizedDriverId },
         include: { user: true }
       });
       
       if (!driver) {
         return res.status(404).json({ error: 'Driver not found' });
       }
+
+      if (!driver.isActive || !['available', 'online'].includes(driver.status)) {
+        return res.status(409).json({ error: 'Driver is not available for assignment' });
+      }
       
 
     // ============ CORRECT LOGIC (NOT RECALCULATE) ============
   // Get the order's pre-calculated delivery fee and distance from checkout
       const deliveryFee = Number(order.deliveryFee || 0);
-      const merchantToCustomerDistance = order.logisticsMetadata?.distanceKm || 5;
+      const merchantToCustomerDistance = getDistanceKmFromMetadata(order.logisticsMetadata, Number(order.distance) || 0);
       
       // Calculate driver's distance to merchant (for display/ETA only)
       let driverDistanceToMerchant = null;
     try {
-      const locationRaw = await redis.get(`driver:${driverId}:location`);
+      const locationRaw = await redis.get(`driver:${normalizedDriverId}:location`);
       if (locationRaw && order.pickupLat && order.pickupLng) {
         const location = JSON.parse(locationRaw.toString());
         const { calculateDistance } = await import('../../utils/distance');
@@ -581,28 +607,35 @@ router.post('/assign-driver',
 
       // Update order and driver
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        // Mark driver as busy
-        await tx.driver.update({
-          where: { id: driverId },
+        const driverClaim = await tx.driver.updateMany({
+          where: { id: normalizedDriverId, isActive: true, status: { in: ['available', 'online'] } },
           data: { status: 'busy', isBusy: true }
         });
-        
-        // Remove from Redis available set
-        await redis.srem("drivers:available", driverId);
-        
-        // Update order
-        const updated = await tx.order.update({
-          where: { orderId },
+        if (driverClaim.count !== 1) {
+          throw new Error('Driver is no longer available for assignment');
+        }
+
+        const orderClaim = await tx.order.updateMany({
+          where: { orderId: normalizedOrderId, status: 'paid', driverId: null },
           data: {
-            driverId: driverId,
+            driverId: normalizedDriverId,
             status: 'assigned',
             tripStage: 'assigned',
             distance: merchantToCustomerDistance,
-            deliveryFee: deliveryFee,
-            driverEarning: driverEarning,
-            platformFee: platformFee
+            deliveryFee,
+            driverEarning,
+            platformFee
           }
         });
+        if (orderClaim.count !== 1) {
+          await tx.driver.updateMany({
+            where: { id: normalizedDriverId, status: 'busy' },
+            data: { status: 'available', isBusy: false }
+          });
+          throw new Error('Order is no longer available for assignment');
+        }
+
+        const updated = await tx.order.findUnique({ where: { orderId: normalizedOrderId } });
         
         // Log audit
         await tx.auditLog.create({
@@ -610,9 +643,9 @@ router.post('/assign-driver',
             adminId,
             action: 'MANUAL_DRIVER_ASSIGNMENT',
             targetType: 'order',
-            targetId: orderId,
+            targetId: normalizedOrderId,
             meta: { 
-              driverId, 
+              driverId: normalizedDriverId, 
               merchantToCustomerDistance, 
               driverDistanceToMerchant,
               deliveryFee 
@@ -626,7 +659,7 @@ router.post('/assign-driver',
       // Notify driver via Socket.io
       const { io } = await import('../../server');
 
-      io.to(driverId).emit("order:new", {
+      io.to(normalizedDriverId).emit("order:new", {
         orderId: updatedOrder.orderId,
         amount: updatedOrder.amount,
         status: 'assigned',
@@ -642,7 +675,7 @@ router.post('/assign-driver',
       });
 
      // Also emit specific assignment event for driver
-      io.to(driverId).emit("order:assigned", {
+      io.to(normalizedDriverId).emit("order:assigned", {
   orderId: updatedOrder.orderId,
   amount: updatedOrder.amount,
   status: 'assigned',
@@ -653,7 +686,7 @@ router.post('/assign-driver',
   deliveryLng: updatedOrder.deliveryLng,
   deliveryFee: deliveryFee,
   distance: driverDistanceToMerchant || merchantToCustomerDistance,
-  driverId: driverId,
+  driverId: normalizedDriverId,
   merchantName: order.merchant?.businessName || 'Merchant',
   assignedBy: 'admin'
 });
@@ -666,7 +699,7 @@ router.post('/assign-driver',
         tripStage: 'assigned',
         driverName: driver.user?.name,
         driverPhone: driver.user?.phone,
-        estimatedArrival: `${Math.ceil((driverDistanceToMerchant || 5) * 3)} minutes`
+        estimatedArrival: driverDistanceToMerchant !== null ? `${Math.ceil(driverDistanceToMerchant * 3)} minutes` : null
       });
       
      // ✅ 3. Emit to MERCHANT (so they know driver is assigned)
@@ -680,7 +713,7 @@ router.post('/assign-driver',
      // ✅ 4. Broadcast general update to refresh all dashboards
       io.emit("order:assigned", {
         orderId: updatedOrder.orderId,
-        driverId: driverId,
+        driverId: normalizedDriverId,
         driverName: driver.user?.name
       });
 
@@ -702,13 +735,13 @@ router.post('/assign-driver',
         );
       }
       
-      console.log(`✅ Manual assignment complete: Order ${orderId} → Driver ${driverId}`);
-      console.log(`📡 Socket events sent to: driver(${driverId}), user(${order.userId}), merchant(${order.merchantId})`);
+      console.log(`✅ Manual assignment complete: Order ${normalizedOrderId} → Driver ${driverId}`);
+      console.log(`📡 Socket events sent to: driver(${normalizedDriverId}), user(${order.userId}), merchant(${order.merchantId})`);
       
       res.json({ success: true, order: updatedOrder });
     } catch (error: any) {
       console.error('Manual assign error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -739,7 +772,7 @@ router.get('/unassigned-orders',
       res.json(orders);
     } catch (error: any) {
       console.error('Unassigned orders error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -750,11 +783,10 @@ router.get('/pending-assignments-count',
   requireRole('admin'), 
   async (req: Request, res: Response) => {
     try {
-      const { DriverAssignmentService } = await import('../../services/driverAssignment.service');
       const count = await DriverAssignmentService.getPendingAssignmentsCount();
       res.json({ count });
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -770,6 +802,16 @@ router.get('/cards', authMiddleware, requireRole('admin'), async (req, res) => {
       },
       orderBy: { createdAt: 'desc' }
     });
+
+    const userIds = cards.map(card => card.userId).filter((id): id is string => Boolean(id));
+    const pendingSubscriptions = userIds.length
+      ? await prisma.subscription.findMany({
+          where: { userId: { in: userIds }, status: "pending_payment" },
+          select: { userId: true },
+          distinct: ["userId"]
+        })
+      : [];
+    const pendingUserIds = new Set(pendingSubscriptions.map(subscription => subscription.userId));
     
     const formattedCards = cards.map(card => ({
       id: card.id,
@@ -781,12 +823,12 @@ router.get('/cards', authMiddleware, requireRole('admin'), async (req, res) => {
       hcoins: card.hcoins,
       isActive: card.isActive,
       createdAt: card.createdAt,
-      hasPendingSubscription: false // Check if user has pending subscription
+      hasPendingSubscription: pendingUserIds.has(card.userId)
     }));
     
     res.json(formattedCards);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -807,22 +849,21 @@ router.get('/cards/analytics', authMiddleware, requireRole('admin'), async (req,
       activeCards
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // Get card transactions
 router.get('/cards/transactions', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
-    const { page = 1, limit = 50 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page, limit, skip } = getPagination(req.query.page, req.query.limit, 50, 200);
     
     const [transactions, total] = await Promise.all([
       prisma.cardTransaction.findMany({
         include: { card: { include: { user: { select: { name: true } } } } },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: parseInt(limit)
+        take: limit
       }),
       prisma.cardTransaction.count()
     ]);
@@ -838,17 +879,21 @@ router.get('/cards/transactions', authMiddleware, requireRole('admin'), async (r
       createdAt: tx.createdAt
     }));
     
-    res.json({ transactions: formattedTransactions, total, page: parseInt(page), limit: parseInt(limit) });
+    res.json({ transactions: formattedTransactions, total, page, limit });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // Toggle card status
 router.patch('/cards/:cardId/status', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
-    const { cardId } = req.params;
+    const cardId = getParamString(req.params.cardId, "card id");
     const { isActive } = req.body;
+
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({ error: "isActive must be a boolean" });
+    }
     
     const updated = await prisma.huriaCard.update({
       where: { id: cardId },
@@ -857,7 +902,7 @@ router.patch('/cards/:cardId/status', authMiddleware, requireRole('admin'), asyn
     
     res.json({ success: true, card: updated });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -891,22 +936,21 @@ router.get('/subscription/analytics', authMiddleware, requireRole('admin'), asyn
       byTier: byTierMap
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // Get all subscriptions (paginated)
 router.get('/subscription/all', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
-    const { page = 1, limit = 50 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page, limit, skip } = getPagination(req.query.page, req.query.limit, 50, 200);
     
     const [subscriptions, total] = await Promise.all([
       prisma.subscription.findMany({
         include: { user: { select: { name: true, email: true, phone: true } } },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: parseInt(limit)
+        take: limit
       }),
       prisma.subscription.count()
     ]);
@@ -925,9 +969,9 @@ router.get('/subscription/all', authMiddleware, requireRole('admin'), async (req
       createdAt: sub.createdAt
     }));
     
-    res.json({ subscriptions: formattedSubs, total, page: parseInt(page), limit: parseInt(limit) });
+    res.json({ subscriptions: formattedSubs, total, page, limit });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -964,14 +1008,14 @@ router.get('/subscription/export', authMiddleware, requireRole('admin'), async (
       res.json(subscriptions);
     }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // Cancel pending subscription (admin)
 router.post('/subscription/cancel-pending/:userId', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = getParamString(req.params.userId, "user id");
     
     const updated = await prisma.subscription.updateMany({
       where: { userId, status: 'pending_payment' },
@@ -985,7 +1029,7 @@ router.post('/subscription/cancel-pending/:userId', authMiddleware, requireRole(
     
     res.json({ success: true, cancelled: updated.count });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -1039,7 +1083,7 @@ router.get('/manual-dispatch/pending',
       res.json(formattedOrders);
     } catch (error: any) {
       console.error('Get pending manual dispatch error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -1055,9 +1099,9 @@ router.get('/manual-dispatch/count',
       });
       
       res.json({ count });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Count error:', error);
-      res.json({ count: 0 });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 );
@@ -1071,13 +1115,16 @@ router.post('/manual-dispatch/assign',
       const { orderId, driverId } = req.body;
       const adminId = req.user!.id;
 
-      if (!orderId || !driverId) {
+      if (typeof orderId !== 'string' || !orderId.trim() || typeof driverId !== 'string' || !driverId.trim()) {
         return res.status(400).json({ error: 'Order ID and Driver ID required' });
       }
 
+      const normalizedOrderId = orderId.trim();
+      const normalizedDriverId = driverId.trim();
+
       // Get order and verify it's in manual dispatch using Prisma
       const manualOrder = await prisma.manualDispatchQueue.findFirst({
-        where: { orderId, status: 'pending' }
+        where: { orderId: normalizedOrderId, status: 'pending' }
       });
 
       if (!manualOrder) {
@@ -1085,7 +1132,7 @@ router.post('/manual-dispatch/assign',
       }
 
       const order = await prisma.order.findUnique({
-        where: { orderId },
+        where: { orderId: normalizedOrderId },
         include: { user: true, merchant: true }
       });
 
@@ -1094,7 +1141,7 @@ router.post('/manual-dispatch/assign',
       }
 
       const driver = await prisma.driver.findUnique({
-        where: { id: driverId },
+        where: { id: normalizedDriverId },
         include: { user: true }
       });
 
@@ -1102,17 +1149,21 @@ router.post('/manual-dispatch/assign',
         return res.status(404).json({ error: 'Driver not found' });
       }
 
+      if (!driver.isActive || !['available', 'online'].includes(driver.status)) {
+        return res.status(409).json({ error: 'Driver is not available for assignment' });
+      }
+
       // ============ CORRECT LOGIC ============
       // USE PRE-CALCULATED VALUES FROM CHECKOUT (NOT RECALCULATE)
       
       // Get the order's pre-calculated delivery fee and distance from checkout
       const deliveryFee = Number(order.deliveryFee || 0);
-      const merchantToCustomerDistance = order.logisticsMetadata?.distanceKm || 5;
+      const merchantToCustomerDistance = getDistanceKmFromMetadata(order.logisticsMetadata, Number(order.distance) || 0);
       
       // Calculate driver's distance to merchant (for display/ETA only)
       let driverDistanceToMerchant = null;
       try {
-        const locationRaw = await redis.get(`driver:${driverId}:location`);
+        const locationRaw = await redis.get(`driver:${normalizedDriverId}:location`);
         if (locationRaw && order.pickupLat && order.pickupLng) {
           const location = JSON.parse(locationRaw.toString());
           const { calculateDistance } = await import('../../utils/distance');
@@ -1141,35 +1192,42 @@ router.post('/manual-dispatch/assign',
 
       // Update order and dispatch queue in transaction
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        // Mark driver as busy
-        await tx.driver.update({
-          where: { id: driverId },
+        const driverClaim = await tx.driver.updateMany({
+          where: { id: normalizedDriverId, isActive: true, status: { in: ['available', 'online'] } },
           data: { status: 'busy', isBusy: true }
         });
+        if (driverClaim.count !== 1) {
+          throw new Error('Driver is no longer available for assignment');
+        }
 
-        // Remove from Redis available set
-        await redis.srem("drivers:available", driverId);
-
-        // Update order - USE PRE-CALCULATED VALUES
-        const updated = await tx.order.update({
-          where: { orderId },
+        const orderClaim = await tx.order.updateMany({
+          where: { orderId: normalizedOrderId, status: 'paid', driverId: null },
           data: {
-            driverId: driverId,
+            driverId: normalizedDriverId,
             status: 'assigned',
             tripStage: 'assigned',
-            distance: merchantToCustomerDistance,  // Use checkout distance
-            deliveryFee: deliveryFee,  // Use checkout delivery fee
-            driverEarning: driverEarning,
-            platformFee: platformFee
+            distance: merchantToCustomerDistance,
+            deliveryFee,
+            driverEarning,
+            platformFee
           }
         });
+        if (orderClaim.count !== 1) {
+          await tx.driver.updateMany({
+            where: { id: normalizedDriverId, status: 'busy' },
+            data: { status: 'available', isBusy: false }
+          });
+          throw new Error('Order is no longer available for assignment');
+        }
+
+        const updated = await tx.order.findUnique({ where: { orderId: normalizedOrderId } });
 
         // Update manual dispatch queue
         await tx.manualDispatchQueue.update({
           where: { id: manualOrder.id },
           data: {
             status: 'assigned',
-            assignedTo: driverId,
+            assignedTo: normalizedDriverId,
             assignedAt: new Date(),
             updatedAt: new Date()
           }
@@ -1181,9 +1239,9 @@ router.post('/manual-dispatch/assign',
             adminId,
             action: 'MANUAL_DISPATCH_ASSIGN',
             targetType: 'order',
-            targetId: orderId,
+            targetId: normalizedOrderId,
             meta: { 
-              driverId, 
+              driverId: normalizedDriverId, 
               merchantToCustomerDistance, 
               driverDistanceToMerchant,
               deliveryFee, 
@@ -1199,7 +1257,7 @@ router.post('/manual-dispatch/assign',
       const { io } = await import('../../server');
 
       // Notify driver
-      io.to(driverId).emit("order:assigned", {
+      io.to(normalizedDriverId).emit("order:assigned", {
         orderId: updatedOrder.orderId,
         amount: updatedOrder.amount,
         status: 'assigned',
@@ -1217,7 +1275,7 @@ router.post('/manual-dispatch/assign',
   requiresAccept: true  // Flag for driver app
       });
 
-      io.to(driverId).emit("order:new", {
+      io.to(normalizedDriverId).emit("order:new", {
         orderId: updatedOrder.orderId,
         amount: updatedOrder.amount,
         status: 'assigned',
@@ -1232,7 +1290,7 @@ router.post('/manual-dispatch/assign',
       });
 
 // 3. Also add to driver's personal room
-io.to(`driver:${driverId}`).emit("order:assigned", {
+io.to(`driver:${normalizedDriverId}`).emit("order:assigned", {
         orderId: updatedOrder.orderId,
         amount: updatedOrder.amount,
         status: 'assigned',
@@ -1252,7 +1310,7 @@ console.log(`📡 Socket events sent to driver ${driverId}: order:assigned, orde
         tripStage: 'assigned',
         driverName: driver.user?.name,
         driverPhone: driver.user?.phone,
-        estimatedArrival: `${Math.ceil((driverDistanceToMerchant || 5) * 3)} minutes`
+        estimatedArrival: driverDistanceToMerchant !== null ? `${Math.ceil(driverDistanceToMerchant * 3)} minutes` : null
       });
 
       // Notify merchant
@@ -1266,7 +1324,7 @@ console.log(`📡 Socket events sent to driver ${driverId}: order:assigned, orde
       // Broadcast to admin dashboard to refresh
       io.emit("admin:manual-dispatch-assigned", {
         orderId,
-        driverId,
+        driverId: normalizedDriverId,
         driverName: driver.user?.name
       });
 
@@ -1297,13 +1355,13 @@ console.log(`📡 Socket events sent to driver ${driverId}: order:assigned, orde
         );
       }
 
-      console.log(`✅ Manual dispatch complete: Order ${orderId} → Driver ${driverId}`);
+      console.log(`✅ Manual dispatch complete: Order ${normalizedOrderId} → Driver ${driverId}`);
       
       res.json({ success: true, order: updatedOrder });
 
     } catch (error: any) {
       console.error('Manual dispatch assign error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -1354,7 +1412,7 @@ router.post('/manual-dispatch/fail',
 
     } catch (error: any) {
       console.error('Manual dispatch fail error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -1365,15 +1423,25 @@ router.get('/orders/:orderId/print',
   requireRole('admin'),
   async (req: Request, res: Response) => {
     try {
-      const { orderId } = req.params;
+      const orderId = getParamString(req.params.orderId, "order id");
 
       const order = await prisma.order.findUnique({
         where: { orderId },
-        include: {
+        select: {
+          orderId: true,
+          createdAt: true,
+          completedAt: true,
+          status: true,
+          amount: true,
+          deliveryFee: true,
+          discountAmount: true,
+          finalAmount: true,
+          deliveryAddress: true,
+          pickupAddress: true,
           user: { select: { name: true, phone: true } },
           merchant: { select: { businessName: true, name: true, phone: true } },
-          driver: { include: { user: { select: { name: true, phone: true } } } },
-          items: { include: { product: true } }
+          driver: { select: { user: { select: { name: true, phone: true } } } },
+          items: { select: { quantity: true, price: true, product: { select: { name: true } } } }
         }
       });
 
@@ -1409,14 +1477,14 @@ router.get('/orders/:orderId/print',
         subtotal: Number(order.amount),
         deliveryFee: Number(order.deliveryFee || 0),
         discountAmount: Number(order.discountAmount || 0),
-        finalAmount: Number(order.finalAmount || order.amount),
+        finalAmount: Number(order.finalAmount ?? order.amount),
         deliveryAddress: order.deliveryAddress,
         pickupAddress: order.pickupAddress
       });
 
     } catch (error: any) {
       console.error('Print order error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -1433,7 +1501,7 @@ router.get('/escalated-orders',
       res.json(escalations);
     } catch (error: any) {
       console.error('Get escalated orders error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );
@@ -1443,10 +1511,15 @@ router.post('/escalated-orders/:orderId/contact',
   authMiddleware,
   requireRole('admin'),
   async (req: Request, res: Response) => {
-    const { orderId } = req.params;
-    const { notes } = req.body;
-    const result = await PriorityOrderService.markMerchantNotified(orderId, req.user!.id, notes);
-    res.json(result);
+    try {
+      const orderId = getParamString(req.params.orderId, "order id");
+      const { notes } = req.body;
+      const result = await PriorityOrderService.markMerchantNotified(orderId, req.user!.id, typeof notes === "string" ? notes.trim() : undefined);
+      res.json(result);
+    } catch (error: unknown) {
+      console.error('Mark merchant notified error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 );
 
@@ -1455,10 +1528,18 @@ router.post('/escalated-orders/:orderId/reassign',
   authMiddleware,
   requireRole('admin'),
   async (req: Request, res: Response) => {
-    const { orderId } = req.params;
-    const { newMerchantId } = req.body;
-    const result = await PriorityOrderService.reassignToAlternateRestaurant(orderId, newMerchantId, req.user!.id);
-    res.json(result);
+    try {
+      const orderId = getParamString(req.params.orderId, "order id");
+      const { newMerchantId } = req.body;
+      if (typeof newMerchantId !== "string" || !newMerchantId.trim()) {
+        return res.status(400).json({ error: "newMerchantId is required" });
+      }
+      const result = await PriorityOrderService.reassignToAlternateRestaurant(orderId, newMerchantId.trim(), req.user!.id);
+      res.json(result);
+    } catch (error: unknown) {
+      console.error('Reassign escalated order error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 );
 
@@ -1467,10 +1548,18 @@ router.post('/escalated-orders/:orderId/cancel',
   authMiddleware,
   requireRole('admin'),
   async (req: Request, res: Response) => {
-    const { orderId } = req.params;
-    const { reason } = req.body;
-    const result = await PriorityOrderService.cancelWithCompensation(orderId, req.user!.id, reason);
-    res.json(result);
+    try {
+      const orderId = getParamString(req.params.orderId, "order id");
+      const { reason } = req.body;
+      if (typeof reason !== "string" || !reason.trim()) {
+        return res.status(400).json({ error: "Cancellation reason is required" });
+      }
+      const result = await PriorityOrderService.cancelWithCompensation(orderId, req.user!.id, reason.trim());
+      res.json(result);
+    } catch (error: unknown) {
+      console.error('Cancel escalated order error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 );
 

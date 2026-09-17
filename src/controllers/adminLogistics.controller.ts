@@ -1,6 +1,6 @@
 // src/controllers/adminLogistics.controller.ts
 
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { prisma } from '../config/db';
 
@@ -36,7 +36,10 @@ export class AdminLogisticsController {
       const formattedRequests = requests.map(req => ({
         id: req.id,
         orderId: req.orderId,
-        merchantName: req.merchant?.businessName || req.merchant?.name || req.merchantName,
+        merchantName:
+          req.merchant?.businessName ||
+          req.merchant?.name ||
+          req.merchantName,
         totalWeight: req.totalWeight,
         totalAmount: req.totalAmount,
         status: req.status,
@@ -59,7 +62,10 @@ export class AdminLogisticsController {
    */
   static async updateFBURequestStatus(req: AuthRequest, res: Response) {
     try {
-      const { requestId } = req.params;
+      const requestId = Array.isArray(req.params.requestId)
+        ? req.params.requestId[0]
+        : req.params.requestId;
+
       const { status, scheduledAt, assignedWarehouseStaffId, notes } = req.body;
       
       const data: any = { 
@@ -70,9 +76,11 @@ export class AdminLogisticsController {
       if (scheduledAt) {
         data.pickupScheduledAt = new Date(scheduledAt);
       }
+
       if (assignedWarehouseStaffId) {
         data.assignedWarehouseStaffId = assignedWarehouseStaffId;
       }
+
       if (notes) {
         data.notes = notes;
       }
@@ -80,6 +88,7 @@ export class AdminLogisticsController {
       if (status === 'picked_up') {
         data.pickupCompletedAt = new Date();
       }
+
       if (status === 'warehouse_received') {
         data.warehouseReceivedAt = new Date();
       }
@@ -115,11 +124,21 @@ export class AdminLogisticsController {
   static async getFBUAnalytics(req: AuthRequest, res: Response) {
     try {
       const [pending, scheduled, pickedUp, received, completed] = await Promise.all([
-        prisma.fBUWarehouseRequest.count({ where: { status: 'pending_pickup' } }),
-        prisma.fBUWarehouseRequest.count({ where: { status: 'pickup_scheduled' } }),
-        prisma.fBUWarehouseRequest.count({ where: { status: 'picked_up' } }),
-        prisma.fBUWarehouseRequest.count({ where: { status: 'warehouse_received' } }),
-        prisma.fBUWarehouseRequest.count({ where: { status: 'completed' } })
+        prisma.fBUWarehouseRequest.count({
+          where: { status: 'pending_pickup' }
+        }),
+        prisma.fBUWarehouseRequest.count({
+          where: { status: 'pickup_scheduled' }
+        }),
+        prisma.fBUWarehouseRequest.count({
+          where: { status: 'picked_up' }
+        }),
+        prisma.fBUWarehouseRequest.count({
+          where: { status: 'warehouse_received' }
+        }),
+        prisma.fBUWarehouseRequest.count({
+          where: { status: 'completed' }
+        })
       ]);
       
       const totalRequests = await prisma.fBUWarehouseRequest.count();

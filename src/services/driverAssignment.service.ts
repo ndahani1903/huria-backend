@@ -3,9 +3,6 @@ import { prisma } from '../config/db';
 import redis from '../config/redis';
 import { io } from '../server';
 import { calculateDistance } from '../utils/distance';
-import { DeliveryFeeService } from './delivery.service';
-import { DriverService } from '../modules/drivers/driver.service';
-import { SMSService } from './sms.service';
 
 export interface AssignedDriver {
   driverId: string;
@@ -15,48 +12,70 @@ export interface AssignedDriver {
 }
 
 export class DriverAssignmentService {
-  private static readonly DRIVER_RESPONSE_TIMEOUT = 60 * 1000; // 60 seconds to accept
-  private static readonly RETRY_INTERVALS = [0, 60, 180, 300, 600]; // seconds
+  private static readonly DRIVER_RESPONSE_TIMEOUT = 60 * 1000;
+  private static readonly RETRY_INTERVALS = [0, 60, 180, 300, 600];
   private static readonly MAX_ASSIGNMENT_ATTEMPTS = 5;
-  private static readonly STALE_ORDER_THRESHOLD = 10 * 60 * 1000; // 10 minutes
+  private static readonly STALE_ORDER_THRESHOLD = 10 * 60 * 1000;
 
+  private static parseAssignment(raw: string | null): AssignedDriver | null {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Partial<AssignedDriver>;
+      if (typeof parsed.driverId !== 'string' || typeof parsed.status !== 'string') return null;
+      if (!['pending_accept', 'accepted', 'declined', 'expired'].includes(parsed.status)) return null;
+      return {
+        driverId: parsed.driverId,
+        assignedAt: new Date(typeof parsed.assignedAt === 'string' || typeof parsed.assignedAt === 'number' ? parsed.assignedAt : Date.now()),
+        expiresAt: new Date(typeof parsed.expiresAt === 'string' || typeof parsed.expiresAt === 'number' ? parsed.expiresAt : Date.now()),
+        status: parsed.status as AssignedDriver['status'],
+      };
+    } catch {
+      return null;
+    }
+  }
   /**
    * Assign a driver to an order (with timeout and fallback)
    */
   static async assignDriverWithTimeout(orderId: string, driverId: string): Promise<boolean> {
-    console.log(`⏰ Assigning driver ${driverId} to order ${orderId} with ${this.DRIVER_RESPONSE_TIMEOUT/1000}s timeout`);
-    
-    // Store assignment with expiry
+    const order = await prisma.order.findUnique({
+      where: { orderId },
+      select: { orderId: true, status: true, driverId: true },
+    });
+
+    if (!order || order.status !== 'assigned' || order.driverId !== driverId) {
+      return false;
+    }
+
+    const driver = await prisma.driver.findUnique({
+      where: { id: driverId },
+      select: { id: true, isActive: true, status: true },
+    });
+
+    if (!driver || !driver.isActive || !['busy', 'available', 'online'].includes(driver.status)) {
+      return false;
+    }
+
     const assignmentKey = `order:${orderId}:assigned_driver`;
     const assignmentData: AssignedDriver = {
       driverId,
       assignedAt: new Date(),
       expiresAt: new Date(Date.now() + this.DRIVER_RESPONSE_TIMEOUT),
-      status: 'pending_accept'
+      status: 'pending_accept',
     };
-    
+
     await redis.setex(assignmentKey, 120, JSON.stringify(assignmentData));
-    
-    // Emit to driver
-    io.to(driverId).emit("order:assigned", {
+
+    io.to(driverId).emit('order:assigned', {
       orderId,
       driverId,
       mustAcceptIn: this.DRIVER_RESPONSE_TIMEOUT / 1000,
-      message: "You have 60 seconds to accept this order"
+      message: 'You have 60 seconds to accept this order',
     });
-    
-    // Set timeout to check if driver accepted
-    setTimeout(async () => {
-      const currentAssignment = await redis.get(assignmentKey);
-      if (currentAssignment) {
-        const data: AssignedDriver = JSON.parse(currentAssignment);
-        if (data.status === 'pending_accept') {
-          console.log(`⏰ Driver ${driverId} did not accept order ${orderId} in time`);
-          await this.handleDriverTimeout(orderId, driverId);
-        }
-      }
+
+    setTimeout(() => {
+      void this.handleDriverTimeout(orderId, driverId);
     }, this.DRIVER_RESPONSE_TIMEOUT);
-    
+
     return true;
   }
 
@@ -64,123 +83,128 @@ export class DriverAssignmentService {
    * Handle driver timeout - reassign or mark as failed
    */
   private static async handleDriverTimeout(orderId: string, driverId: string): Promise<void> {
-    console.log(`🚨 Driver ${driverId} timeout for order ${orderId}`);
-    
-    // Mark driver as available again
-    await DriverService.markAvailable(driverId);
-    
-    // Remove assignment
-    await redis.del(`order:${orderId}:assigned_driver`);
-    
-    // Get current order status
-    const order = await prisma.order.findUnique({
-      where: { orderId },
-      select: { status: true, driverId: true }
-    });
-    
-    // Only reassign if order is still assigned to this driver and not accepted
-    if (order && order.status === 'assigned' && order.driverId === driverId) {
-      // Reset order status to paid
-      await prisma.order.update({
-        where: { orderId },
-        data: { 
-          status: 'paid',
-          driverId: null,
-          tripStage: 'pending'
-        }
-      });
-      
-      // Add to unassigned orders set in Redis
-      await redis.sadd("unassigned_orders", orderId);
-      
-      // Notify admin dashboard
-      io.emit("admin:assignment-failed", {
-        orderId,
-        driverId,
-        reason: "Driver did not accept in time",
-        timestamp: new Date().toISOString()
-      });
-      
-      // Retry assignment
-      await this.startAssignment(orderId);
+    const assignmentKey = `order:${orderId}:assigned_driver`;
+    const assignment = this.parseAssignment(await redis.get(assignmentKey));
+
+    if (!assignment || assignment.driverId !== driverId || assignment.status !== 'pending_accept') {
+      return;
     }
+
+    const now = Date.now();
+    if (assignment.expiresAt.getTime() > now) {
+      return;
+    }
+
+    const released = await prisma.$transaction(async (tx) => {
+      const current = await tx.order.findUnique({
+        where: { orderId },
+        select: { status: true, driverId: true },
+      });
+
+      if (!current || current.status !== 'assigned' || current.driverId !== driverId) {
+        return false;
+      }
+
+      await tx.order.update({
+        where: { orderId },
+        data: { status: 'paid', driverId: null, tripStage: 'pending' },
+      });
+
+      await tx.driver.updateMany({
+        where: { id: driverId, status: 'busy' },
+        data: { status: 'available', isBusy: false },
+      });
+
+      return true;
+    });
+
+    await redis.del(assignmentKey);
+
+    if (!released) return;
+
+    await redis.sadd('unassigned_orders', orderId);
+    io.emit('admin:assignment-failed', {
+      orderId,
+      driverId,
+      reason: 'Driver did not accept in time',
+      timestamp: new Date().toISOString(),
+    });
+
+    await this.startAssignment(orderId);
   }
 
   /**
    * Handle driver decline
    */
   static async handleDriverDecline(orderId: string, driverId: string): Promise<void> {
-    console.log(`🚨 Driver ${driverId} declined order ${orderId}`);
-    
-    // Remove assignment
-    await redis.del(`order:${orderId}:assigned_driver`);
-    
-    // Mark driver as available
-    await DriverService.markAvailable(driverId);
-    
-    // Reset order
-    const order = await prisma.order.findUnique({
-      where: { orderId },
-      select: { status: true }
-    });
-    
-    if (order && order.status === 'assigned') {
-      await prisma.order.update({
-        where: { orderId },
-        data: { 
-          status: 'paid',
-          driverId: null,
-          tripStage: 'pending'
-        }
-      });
-      
-      // Add to unassigned
-      await redis.sadd("unassigned_orders", orderId);
-      
-      // Notify admin
-      io.emit("admin:assignment-declined", {
-        orderId,
-        driverId,
-        timestamp: new Date().toISOString()
-      });
-      
-      // Retry assignment
-      await this.startAssignment(orderId);
+    const assignmentKey = `order:${orderId}:assigned_driver`;
+    const assignment = this.parseAssignment(await redis.get(assignmentKey));
+
+    if (!assignment || assignment.driverId !== driverId || assignment.status !== 'pending_accept') {
+      throw new Error('Assignment is invalid or no longer pending for this driver');
     }
+
+    const changed = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { orderId },
+        select: { status: true, driverId: true },
+      });
+
+      if (!order || order.status !== 'assigned' || order.driverId !== driverId) return false;
+
+      await tx.order.update({
+        where: { orderId },
+        data: { status: 'paid', driverId: null, tripStage: 'pending' },
+      });
+      await tx.driver.updateMany({
+        where: { id: driverId },
+        data: { status: 'available', isBusy: false },
+      });
+      return true;
+    });
+
+    await redis.del(assignmentKey);
+
+    if (!changed) return;
+
+    await redis.sadd('unassigned_orders', orderId);
+    io.emit('admin:assignment-declined', {
+      orderId,
+      driverId,
+      timestamp: new Date().toISOString(),
+    });
+
+    await this.startAssignment(orderId);
   }
 
   /**
    * Handle driver accept
    */
   static async handleDriverAccept(orderId: string, driverId: string): Promise<void> {
-    console.log(`✅ Driver ${driverId} accepted order ${orderId}`);
-    
-    // Update assignment status
     const assignmentKey = `order:${orderId}:assigned_driver`;
-    const assignment = await redis.get(assignmentKey);
-    if (assignment) {
-      const data: AssignedDriver = JSON.parse(assignment);
-      data.status = 'accepted';
-      await redis.setex(assignmentKey, 3600, JSON.stringify(data));
+    const assignment = this.parseAssignment(await redis.get(assignmentKey));
+
+    if (!assignment || assignment.driverId !== driverId || assignment.status !== 'pending_accept') {
+      throw new Error('Assignment is invalid or no longer pending for this driver');
     }
-    
-    // Remove from unassigned
-    await redis.srem("unassigned_orders", orderId);
-    
-    // Update order status
-    await prisma.order.update({
-      where: { orderId },
-      data: { 
-        status: 'assigned',
-        tripStage: 'assigned'
-      }
+
+    const updated = await prisma.order.updateMany({
+      where: { orderId, status: 'assigned', driverId },
+      data: { status: 'assigned', tripStage: 'assigned' },
     });
-    
-    // Notify admin
-    io.emit("admin:assignment-accepted", {
+
+    if (updated.count !== 1) {
+      throw new Error('Order is no longer assigned to this driver');
+    }
+
+    assignment.status = 'accepted';
+    await redis.setex(assignmentKey, 3600, JSON.stringify(assignment));
+    await redis.srem('unassigned_orders', orderId);
+
+    io.emit('admin:assignment-accepted', {
       orderId,
       driverId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 
@@ -193,10 +217,22 @@ export class DriverAssignmentService {
     // Check if this is a Restaurant or Supermarket order (should use manual dispatch)
   const order = await prisma.order.findUnique({
     where: { orderId },
-    include: { merchant: { select: { merchantType: true } } }
+    select: {
+      status: true,
+      driverId: true,
+      merchant: { select: { merchantType: true } },
+    },
   });
+
+  if (!order) {
+    throw new Error('Order not found');
+  }
+
+  if (order.status !== 'paid' || order.driverId !== null) {
+    return;
+  }
   
-  if (order?.merchant?.merchantType === 'RESTAURANT' || 
+  if (order.merchant?.merchantType === 'RESTAURANT' || 
       order?.merchant?.merchantType === 'SUPERMARKET') {
     console.log(`⚠️ Order ${orderId} is ${order.merchant.merchantType} - Using MANUAL dispatch, skipping auto-assignment`);
     return;
@@ -273,23 +309,68 @@ export class DriverAssignmentService {
       }
     }
     
-    // Assign best driver
+    // Claim the driver and order atomically to prevent two orders from taking
+    // the same driver during concurrent assignment attempts.
     const bestDriver = availableDrivers[0];
-    console.log(`✅ Assigning driver ${bestDriver.id} to order ${orderId}`);
-    
-    // Assign with timeout
-    await this.assignDriverWithTimeout(orderId, bestDriver.id);
-    
-    // Update order with driver info (but keep status as assigned_waiting)
-    await prisma.order.update({
-      where: { orderId },
-      data: {
-        driverId: bestDriver.id,
-        status: 'assigned',
-        tripStage: 'assigned'
+
+    const claimed = await prisma.$transaction(async (tx) => {
+      const driverClaim = await tx.driver.updateMany({
+        where: {
+          id: bestDriver.id,
+          isActive: true,
+          status: { in: ['available', 'online'] },
+        },
+        data: { status: 'busy', isBusy: true },
+      });
+
+      if (driverClaim.count !== 1) return false;
+
+      const orderClaim = await tx.order.updateMany({
+        where: { orderId, status: 'paid', driverId: null },
+        data: { driverId: bestDriver.id, status: 'assigned', tripStage: 'assigned' },
+      });
+
+      if (orderClaim.count !== 1) {
+        await tx.driver.updateMany({
+          where: { id: bestDriver.id, status: 'busy' },
+          data: { status: 'available', isBusy: false },
+        });
+        return false;
       }
+
+      return true;
     });
-    
+
+    if (!claimed) {
+      if (attemptNumber < this.MAX_ASSIGNMENT_ATTEMPTS - 1) {
+        const nextDelay = this.RETRY_INTERVALS[attemptNumber + 1] * 1000;
+        setTimeout(() => {
+          void this.attemptAssignment(orderId, attemptNumber + 1);
+        }, nextDelay);
+      }
+      return false;
+    }
+
+    let assignmentCreated = false;
+    try {
+      assignmentCreated = await this.assignDriverWithTimeout(orderId, bestDriver.id);
+    } catch (error) {
+      console.error(`Driver assignment setup failed for order ${orderId}:`, error);
+    }
+
+    if (!assignmentCreated) {
+      await prisma.order.updateMany({
+        where: { orderId, status: 'assigned', driverId: bestDriver.id },
+        data: { status: 'paid', driverId: null, tripStage: 'pending' },
+      });
+      await prisma.driver.updateMany({
+        where: { id: bestDriver.id, status: 'busy' },
+        data: { status: 'available', isBusy: false },
+      });
+      await redis.sadd('unassigned_orders', orderId);
+      return false;
+    }
+
     await this.cleanupAssignment(orderId);
     return true;
   }
@@ -326,12 +407,18 @@ export class DriverAssignmentService {
       let driverLng = driver.currentLng;
       
       if (locationRaw) {
-        const location = JSON.parse(locationRaw.toString());
-        driverLat = location.lat;
-        driverLng = location.lng;
+        try {
+          const location = JSON.parse(locationRaw.toString()) as { lat?: unknown; lng?: unknown };
+          if (typeof location.lat === 'number' && typeof location.lng === 'number') {
+            driverLat = location.lat;
+            driverLng = location.lng;
+          }
+        } catch {
+          // Ignore malformed cached location and use the driver's persisted location.
+        }
       }
       
-      if (driverLat && driverLng && order.pickupLat && order.pickupLng) {
+      if (driverLat != null && driverLng != null && order.pickupLat != null && order.pickupLng != null) {
         const distance = calculateDistance(
           order.pickupLat,
           order.pickupLng,
@@ -356,17 +443,6 @@ export class DriverAssignmentService {
     });
     
     if (!order) return;
-    
-    // Create notification
-    await prisma.notification.create({
-      data: {
-        userId: 'system',
-        type: 'stale_order_alert',
-        title: '⚠️ Order Assignment Delayed',
-        message: `Order ${order.orderId} has been waiting for ${Math.floor((Date.now() - new Date(order.createdAt).getTime())/60000)} minutes. Attempt ${attemptNumber}.`,
-        data: { orderId, attemptNumber }
-      }
-    });
     
     // Socket event for admin
     io.emit("admin:stale-order", {
@@ -406,62 +482,95 @@ export class DriverAssignmentService {
    * Get all unassigned orders (for admin panel)
    */
   static async getUnassignedOrders(): Promise<any[]> {
-    const unassignedIds = await redis.smembers("unassigned_orders");
-    let ids: string[] = [];
-    
-    if (unassignedIds instanceof Set) {
-      ids = Array.from(unassignedIds).map(id => id.toString());
-    } else if (Array.isArray(unassignedIds)) {
-      ids = unassignedIds.map(id => id.toString());
-    }
-    
-    if (ids.length === 0) return [];
-    
-    const orders = await prisma.order.findMany({
+    return prisma.order.findMany({
       where: {
-        orderId: { in: ids },
-        status: 'paid'
+        status: 'paid',
+        driverId: null,
       },
       include: {
         user: { select: { name: true, phone: true } },
-        merchant: { select: { businessName: true, pickupLat: true, pickupLng: true } }
+        merchant: { select: { businessName: true, pickupLat: true, pickupLng: true } },
       },
-      orderBy: { createdAt: 'asc' }
+      orderBy: { createdAt: 'asc' },
     });
-    
-    return orders;
+  }
+
+  /**
+   * Count orders currently waiting for driver assignment.
+   * The database is the source of truth; Redis is only a dispatch index.
+   */
+  static async getPendingAssignmentsCount(): Promise<number> {
+    return prisma.order.count({
+      where: { status: 'paid', driverId: null },
+    });
   }
 
   /**
    * Manual assign (bypasses timeout and retry)
    */
   static async manualAssign(orderId: string, driverId: string, adminId: string): Promise<any> {
-    console.log(`👤 Manual assignment: Admin ${adminId} assigning driver ${driverId} to order ${orderId}`);
-    
-    // Remove from unassigned
-    await redis.srem("unassigned_orders", orderId);
-    
-    // Mark driver as busy
-    await DriverService.markBusy(driverId);
-    
-    // Update order
-    const updated = await prisma.order.update({
-      where: { orderId },
-      data: {
-        driverId: driverId,
-        status: 'assigned',
-        tripStage: 'assigned'
+    if (!orderId.trim() || !driverId.trim() || !adminId.trim()) {
+      throw new Error('Order ID, driver ID and admin ID are required');
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const driverClaim = await tx.driver.updateMany({
+        where: {
+          id: driverId,
+          isActive: true,
+          status: { in: ['available', 'online'] },
+        },
+        data: { status: 'busy', isBusy: true },
+      });
+
+      if (driverClaim.count !== 1) {
+        throw new Error('Driver is not available for assignment');
       }
+
+      const orderClaim = await tx.order.updateMany({
+        where: { orderId, status: 'paid', driverId: null },
+        data: { driverId, status: 'assigned', tripStage: 'assigned' },
+      });
+
+      if (orderClaim.count !== 1) {
+        await tx.driver.updateMany({
+          where: { id: driverId, status: 'busy' },
+          data: { status: 'available', isBusy: false },
+        });
+        throw new Error('Order is not available for assignment');
+      }
+
+      const order = await tx.order.findUnique({
+        where: { orderId },
+        include: { user: true, merchant: true },
+      });
+
+      if (!order) throw new Error('Order not found after assignment');
+
+      await tx.auditLog.create({
+        data: {
+          adminId,
+          action: 'MANUAL_DRIVER_ASSIGNMENT',
+          targetType: 'order',
+          targetId: orderId,
+          meta: { driverId },
+        },
+      });
+
+      return order;
     });
-    
-    // Notify driver immediately
-    io.to(driverId).emit("order:assigned", {
+
+    await redis.srem('unassigned_orders', orderId);
+    await redis.del(`assignment:${orderId}`);
+
+    io.to(driverId).emit('order:assigned', {
       orderId,
       driverId,
       assignedBy: 'admin',
-      message: "Order assigned to you by admin"
+      message: 'Order assigned to you by admin',
     });
-    
+
     return updated;
   }
+
 }

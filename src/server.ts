@@ -9,7 +9,7 @@ import app from './app';
 import { env } from './config/env';
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient } from "redis";
-import { SocialSocket } from "./modules/social-v2/social.socket";
+//import { SocialSocket } from "./modules/social-v2/social.socket";
 import OrderService from "./modules/orders/order.service";
 
 import orderRoutes from './modules/orders/order.routes';
@@ -41,7 +41,7 @@ import coPilotRoutes from './routes/copilot.routes';
 import addressRoutes from './routes/address.routes';
 import signatureRoutes from './routes/signature.routes';
 
-import socialRoutes from './modules/social-v2/social.routes';
+//import socialRoutes from './modules/social-v2/social.routes';
 
 import './jobs/subscriptionRenewal.job'; // Start the cron job
 import './jobs/gamificationReset.job';
@@ -87,7 +87,7 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/users', notificationSettingsRoutes);
 app.use('/api/test', testNotificationRoutes);
 
-app.use('/api/social/v2', socialRoutes);
+//app.use('/api/social/v2', socialRoutes);
 
 export const io = new Server(httpServer, {
   cors: {
@@ -95,7 +95,7 @@ export const io = new Server(httpServer, {
   }
 });
 
-SocialSocket.initialize(io);
+//SocialSocket.initialize(io);
 
 let pubClient: any;
 let subClient: any;
