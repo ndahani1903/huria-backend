@@ -339,7 +339,7 @@ model Merchant {
   cuisineType     String? // e.g., "Italian", "Chinese", "Local"
   dietaryTags     String[] @default([]) // ["Veg", "Halal", "Gluten-Free"]
 
-  isActive       Boolean  @default(true)
+  isActive            Boolean @default(true)
   isAcceptingOrders   Boolean @default(true)
   maxDeliveryRadiusKm Float?  @default(40) // Maximum delivery distance
 
@@ -1817,7 +1817,7 @@ model SocialPost {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  deletedAt DateTime?  // For soft delete
+  deletedAt DateTime? // For soft delete
 
   media      SocialPostMedia[]
   comments   SocialComment[]
