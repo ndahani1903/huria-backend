@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { prisma } from "../../config/db";
 import redis from "../../config/redis";
 import { Role } from "@prisma/client";
-import { normalizeTZPhone } from "../../utils/phone";
+import { normalizeTZPhone  } from "../../utils/phone";
 import {
   signAccessToken,
   signRefreshToken,
@@ -14,210 +14,95 @@ import {
 } from "../../utils/token.util";
 
 export class AuthService {
-  /**
-   * ============================================================
-   * REGISTER
-   * ============================================================
-   */
-
-  static async register(
-    data: any,
-    isPasswordPreHashed: boolean = false
-  ) {
-    const {
-      role,
-      password,
-      name,
-      email,
-      phone: phoneInput,
-
-      businessName,
-      businessType,
-      merchantType,
-      pickupAddress,
-      pickupLat,
-      pickupLng,
-
-      licenseNumber,
-      nidaNumber,
-      vehicleType,
-      vehiclePlate,
-    } = data;
-
-    /**
-     * ----------------------------------------------------------
-     * VALIDATION
-     * ----------------------------------------------------------
-     */
-
+  static async register(data: any, isPasswordPreHashed: boolean = false) {
+   const { role, password, name, email, phone: phoneInput,
+        businessName, businessType, merchantType, 
+        pickupAddress, pickupLat, pickupLng, licenseNumber, nidaNumber, vehicleType, vehiclePlate } = data;
+   
+   // ✅ Validate required fields
     if (!phoneInput) {
       throw new Error("Phone number is required");
     }
-
     if (!password) {
       throw new Error("Password is required");
     }
-
     if (!name) {
       throw new Error("Name is required");
     }
-
     if (!email) {
       throw new Error("Email is required");
     }
 
-    if (!role) {
-      throw new Error("Role is required");
-    }
+     const phone = normalizeTZPhone(phoneInput);
 
-    const phone = normalizeTZPhone(phoneInput);
-    const normalizedEmail = email.trim().toLowerCase();
-
-    const allowedRoles = [
-      "customer",
-      "driver",
-      "merchant",
-      "admin",
-    ];
+    const allowedRoles = ["customer", "driver", "merchant", "admin"];
 
     if (!allowedRoles.includes(role)) {
       throw new Error("Invalid role");
     }
 
-    /**
-     * ----------------------------------------------------------
-     * DUPLICATE CHECK
-     * ----------------------------------------------------------
-     */
-
     const existing = await prisma.user.findFirst({
       where: {
-        OR: [
-          {
-            email: normalizedEmail,
-          },
-          {
-            phone,
-          },
-        ],
+        OR: [{ email: data.email }, { phone }],
       },
     });
 
-    if (existing) {
-      throw new Error("User already exists");
-    }
+    if (existing) throw new Error("User already exists");
 
-    /**
-     * ----------------------------------------------------------
-     * PASSWORD
-     * ----------------------------------------------------------
-     */
 
-    let hashedPassword = password;
+   // Only hash if password is NOT already hashed
+  let hashedPassword = password;
+  if (!isPasswordPreHashed) {
+    hashedPassword = await bcrypt.hash(password, 10);
+  }
 
-    if (!isPasswordPreHashed) {
-      hashedPassword = await bcrypt.hash(
-        password,
-        12
-      );
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * EMAIL VERIFICATION TOKEN
-     * ----------------------------------------------------------
-     */
-
-    const verifyToken = crypto
-      .randomBytes(32)
-      .toString("hex");
-
-    /**
-     * ----------------------------------------------------------
-     * CREATE USER
-     * ----------------------------------------------------------
-     */
+   const verifyToken = crypto.randomBytes(32).toString("hex");
 
     const user = await prisma.user.create({
       data: {
         name,
         phone,
-        email: normalizedEmail,
+        email: email.toLowerCase(),
         password: hashedPassword,
-
         role: role as Role,
-
         verifyToken,
-        verifyTokenExpires: new Date(
-          Date.now() + 1000 * 60 * 60 * 24
-        ),
-
+        verifyTokenExpires: new Date(Date.now() + 1000 * 60 * 60 * 24),
         phoneVerified: false,
-        phoneOTP: null,
-        phoneOTPExpiresAt: null,
-        phoneOTPAttempts: 0,
+      phoneOTP: null,
+      phoneOTPExpiresAt: null,
+      phoneOTPAttempts: 0
       },
     });
 
-    let merchantId: string | null = null;
-    let driverId: string | null = null;
-    let savedMerchantType: string | null = null;
+    let merchantId = null;
+    let driverId = null;
+    let savedMerchantType = null; 
 
-    /**
-     * ----------------------------------------------------------
-     * SEND PHONE OTP
-     * ----------------------------------------------------------
-     */
 
-    try {
-      const { OTPService } = await import(
-        "../../services/otp.service"
-      );
-
-      await OTPService.sendPhoneOTP(
-        user.id,
-        phone
-      );
-
-      console.log(
-        `📱 Phone OTP sent for user ${user.id}`
-      );
-    } catch (otpError) {
-      console.error(
-        "Failed to send phone OTP:",
-        otpError
-      );
-
-      /**
-       * Registration itself should not fail just because
-       * the SMS provider failed.
-       */
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * MERCHANT
-     * ----------------------------------------------------------
-     */
+    // ✅ Send OTP after registration
+  try {
+    const { OTPService } = await import('../../services/otp.service');
+    await OTPService.sendPhoneOTP(user.id, phone);
+    console.log(`📱 OTP sent to ${phone} for user ${user.id}`);
+  } catch (otpError) {
+    console.error('Failed to send OTP:', otpError);
+    // Don't fail registration if OTP fails
+  }
 
     if (role === "merchant") {
       const merchant = await prisma.merchant.create({
         data: {
           userId: user.id,
-
           name,
           phone,
-
           businessName,
           businessType,
+          merchantType: merchantType || "GENERAL_ECOMMERCE",
 
-          merchantType:
-            merchantType || "GENERAL_ECOMMERCE",
-
+          // ✅ SAVE PICKUP LOCATION
           pickupAddress,
           pickupLat,
           pickupLng,
-
           totalRevenue: 0,
         },
       });
@@ -226,480 +111,214 @@ export class AuthService {
       savedMerchantType = merchant.merchantType;
     }
 
-    /**
-     * ----------------------------------------------------------
-     * DRIVER
-     * ----------------------------------------------------------
-     */
-
     if (role === "driver") {
       const driver = await prisma.driver.create({
         data: {
           userId: user.id,
-
           name,
           phone,
-
           licenseNumber,
           nidaNumber,
-
           vehicleType,
-          vehiclePlate,
-
-          isActive: true,
+         vehiclePlate,
+         isActive: true,
           isBusy: false,
-
-          totalDeliveries: 0,
+          totalDeliveries: 0, 
           rating: 5.0,
-
           status: "available",
-
           totalEarnings: 0,
         },
       });
 
       driverId = driver.id;
 
-      await redis.sadd(
-        "drivers:available",
-        driver.id
-      );
+      await redis.sadd("drivers:available", driver.id);
     }
 
-    /**
-     * ----------------------------------------------------------
-     * ACCESS TOKEN
-     * ----------------------------------------------------------
-     */
-
-    const accessToken = signAccessToken({
+   const accessToken = signAccessToken({
       id: user.id,
       role: user.role,
-      driverId,
-      merchantType: savedMerchantType,
+     driverId: driverId 
     });
-
-    /**
-     * ----------------------------------------------------------
-     * REFRESH TOKEN
-     * ----------------------------------------------------------
-     */
 
     const refreshToken = signRefreshToken({
-      id: user.id,
+      id: user.id
     });
 
-    const refreshTokenHash = await bcrypt.hash(
-      refreshToken,
-      12
-    );
-
+    const hash = await bcrypt.hash(refreshToken, 10);
     await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        refreshTokenHash,
-      },
+      where: { id: user.id },
+      data: { refreshTokenHash: hash }
     });
-
-    /**
-     * ----------------------------------------------------------
-     * RESPONSE
-     * ----------------------------------------------------------
-     */
 
     return {
-      user: {
+       user: {
         id: user.id,
         name: user.name,
         email: user.email,
         phone: user.phone,
         role: user.role,
-        merchantType: savedMerchantType,
+        merchantType: savedMerchantType 
       },
-
       accessToken,
       refreshToken,
-
-      verifyToken,
+      verifyToken
     };
   }
 
-  /**
-   * ============================================================
-   * LOGIN
-   * ============================================================
-   */
-
-  static async login(
-    phoneInput: string,
-    password: string
-  ) {
-    /**
-     * ----------------------------------------------------------
-     * VALIDATION
-     * ----------------------------------------------------------
-     */
-
+  static async login(phoneInput: string, password: string) {
+    // ✅ Validate inputs
     if (!phoneInput) {
       throw new Error("Phone number is required");
     }
-
     if (!password) {
       throw new Error("Password is required");
     }
+  
+   console.log("📞 RAW PHONE:", phoneInput);
 
     const phone = normalizeTZPhone(phoneInput);
 
-    /**
-     * ----------------------------------------------------------
-     * FIND USER
-     * ----------------------------------------------------------
-     */
+   console.log("📞 NORMALIZED PHONE:", phone);
 
     const user = await prisma.user.findUnique({
-      where: {
-        phone,
-      },
+      where: { phone }
     });
 
-    if (!user) {
-      throw new Error("Invalid credentials");
-    }
+   console.log("👤 USER FOUND:", user);
+     console.log("🔐 Input password length:", password.length);
+  console.log("🔐 Stored hash:", user.password);
 
-    /**
-     * ----------------------------------------------------------
-     * ACCOUNT STATUS
-     * ----------------------------------------------------------
-     */
+    if (!user) throw new Error("User not found");
 
-    if (user.status === "suspended") {
-      throw new Error("Account is suspended");
-    }
+   // Test if the hash is valid format
+  try {
+    const valid = await bcrypt.compare(password, user.password);
+    console.log("👤 Password match result:", valid);
+    
+    // If still false, try with a test hash to see if bcrypt is working
+    const testHash = await bcrypt.hash("123456", 10);
+    const testValid = await bcrypt.compare("123456", testHash);
+    console.log("🔧 Bcrypt working correctly:", testValid);
+   
+    if (!valid) throw new Error("Invalid credentials");
+    } catch (bcryptError) {
+    console.error("❌ Bcrypt error:", bcryptError);
+    throw new Error("Invalid credentials");
+  }
 
-    if (user.status === "banned") {
-      throw new Error("Account is banned");
-    }
-
-    if (user.deletedAt) {
-      throw new Error("Account is unavailable");
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * PASSWORD CHECK
-     * ----------------------------------------------------------
-     */
-
-    const passwordValid = await bcrypt.compare(
-      password,
-      user.password
-    );
-
-    if (!passwordValid) {
-      throw new Error("Invalid credentials");
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * MERCHANT INFORMATION
-     * ----------------------------------------------------------
-     */
-
-    let merchantId: string | null = null;
-    let merchantType: string | null = null;
+    let merchantId = null;
+    let driverId = null;
+    let merchantType = null;
 
     if (user.role === "merchant") {
-      const merchant =
-        await prisma.merchant.findUnique({
-          where: {
-            userId: user.id,
-          },
-
-          select: {
-            id: true,
-            merchantType: true,
-          },
-        });
+      const merchant = await prisma.merchant.findUnique({
+        where: { userId: user.id },
+        select: { id: true, merchantType: true }
+      });
 
       merchantId = merchant?.id || null;
-
-      merchantType =
-        merchant?.merchantType ||
-        "GENERAL_ECOMMERCE";
+      merchantType = merchant?.merchantType || "GENERAL_ECOMMERCE";
     }
 
-    /**
-     * ----------------------------------------------------------
-     * DRIVER INFORMATION
-     * ----------------------------------------------------------
-     */
-
-    let driverId: string | null = null;
-
     if (user.role === "driver") {
-      const driver =
-        await prisma.driver.findUnique({
-          where: {
-            userId: user.id,
-          },
-        });
+      const driver = await prisma.driver.findUnique({
+        where: { userId: user.id },
+      });
 
       driverId = driver?.id || null;
 
-      if (driverId && driver?.isActive) {
-        await redis.sadd(
-          "drivers:available",
-          driverId
-        );
+      if (driverId) {
+        await redis.sadd("drivers:available", driverId);
       }
     }
 
-    /**
-     * ----------------------------------------------------------
-     * ACCESS TOKEN
-     * ----------------------------------------------------------
-     */
-
-    const accessToken = signAccessToken({
+     const accessToken = signAccessToken({
       id: user.id,
       role: user.role,
-
-      driverId,
-      merchantId,
-      merchantType,
+     driverId: driverId,
+      merchantType: merchantType 
     });
-
-    /**
-     * ----------------------------------------------------------
-     * REFRESH TOKEN
-     * ----------------------------------------------------------
-     */
 
     const refreshToken = signRefreshToken({
-      id: user.id,
+      id: user.id
     });
 
-    const refreshTokenHash = await bcrypt.hash(
-      refreshToken,
-      12
-    );
+    const hash = await bcrypt.hash(refreshToken, 10);
 
     await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        refreshTokenHash,
-      },
+      where: { id: user.id },
+      data: { refreshTokenHash: hash }
     });
-
-    /**
-     * ----------------------------------------------------------
-     * RESPONSE
-     * ----------------------------------------------------------
-     */
 
     return {
       success: true,
-
       user: {
         id: user.id,
         name: user.name,
         email: user.email,
         phone: user.phone,
         role: user.role,
-
         emailVerified: user.emailVerified,
-        phoneVerified: user.phoneVerified,
-
-        merchantType,
+        merchantType: merchantType
       },
-
       accessToken,
-      refreshToken,
+      refreshToken
     };
   }
 
-  /**
-   * ============================================================
-   * REFRESH TOKEN
-   * ============================================================
-   */
 
-  static async refresh(token: string) {
+   static async refresh(token: string) {
     if (!token) {
       throw new Error("Refresh token is required");
     }
 
-    let payload: any;
-
-    try {
-      payload = verifyRefreshToken(token);
-    } catch {
-      throw new Error("Unauthorized");
-    }
-
-    if (!payload?.id) {
-      throw new Error("Unauthorized");
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * FIND USER
-     * ----------------------------------------------------------
-     */
+    const payload: any = verifyRefreshToken(token);
 
     const user = await prisma.user.findUnique({
-      where: {
-        id: payload.id,
-      },
+      where: { id: payload.id }
     });
 
     if (!user || !user.refreshTokenHash) {
       throw new Error("Unauthorized");
     }
 
-    /**
-     * ----------------------------------------------------------
-     * ACCOUNT STATUS
-     * ----------------------------------------------------------
-     */
-
-    if (
-      user.status === "suspended" ||
-      user.status === "banned" ||
-      user.deletedAt
-    ) {
-      throw new Error("Unauthorized");
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * VERIFY REFRESH TOKEN
-     * ----------------------------------------------------------
-     */
-
-    const valid = await bcrypt.compare(
+     const valid = await bcrypt.compare(
       token,
       user.refreshTokenHash
     );
 
-    if (!valid) {
-      throw new Error("Unauthorized");
-    }
+    if (!valid) throw new Error("Unauthorized");
+    
+    let driverId = null;
 
-    /**
-     * ----------------------------------------------------------
-     * LOAD MERCHANT
-     * ----------------------------------------------------------
-     */
+if (user.role === "driver") {
+  const driver = await prisma.driver.findUnique({
+    where: { userId: user.id },
+  });
 
-    let merchantId: string | null = null;
-    let merchantType: string | null = null;
-
-    if (user.role === "merchant") {
-      const merchant =
-        await prisma.merchant.findUnique({
-          where: {
-            userId: user.id,
-          },
-
-          select: {
-            id: true,
-            merchantType: true,
-          },
-        });
-
-      merchantId = merchant?.id || null;
-
-      merchantType =
-        merchant?.merchantType ||
-        "GENERAL_ECOMMERCE";
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * LOAD DRIVER
-     * ----------------------------------------------------------
-     */
-
-    let driverId: string | null = null;
-
-    if (user.role === "driver") {
-      const driver =
-        await prisma.driver.findUnique({
-          where: {
-            userId: user.id,
-          },
-
-          select: {
-            id: true,
-            isActive: true,
-          },
-        });
-
-      driverId = driver?.id || null;
-
-      if (driverId && driver?.isActive) {
-        await redis.sadd(
-          "drivers:available",
-          driverId
-        );
-      }
-    }
-
-    /**
-     * ----------------------------------------------------------
-     * CREATE NEW ACCESS TOKEN
-     * ----------------------------------------------------------
-     */
+  driverId = driver?.id || null;
+}
 
     const accessToken = signAccessToken({
       id: user.id,
       role: user.role,
-
-      driverId,
-      merchantId,
-      merchantType,
+     driverId: driverId 
     });
-
-    /**
-     * ----------------------------------------------------------
-     * ROTATE REFRESH TOKEN
-     * ----------------------------------------------------------
-     */
 
     const refreshToken = signRefreshToken({
-      id: user.id,
+      id: user.id
     });
 
-    const refreshTokenHash = await bcrypt.hash(
-      refreshToken,
-      12
-    );
+    const hash = await bcrypt.hash(refreshToken, 10);
 
     await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        refreshTokenHash,
-      },
+      where: { id: user.id },
+      data: { refreshTokenHash: hash }
     });
 
-    return {
-      accessToken,
-      refreshToken,
-    };
+    return { accessToken, refreshToken };
   }
-
-  /**
-   * ============================================================
-   * VERIFY ACCESS TOKEN
-   * ============================================================
-   */
 
   static async verifyToken(token: string) {
     if (!token) {
@@ -707,225 +326,113 @@ export class AuthService {
     }
 
     try {
-      const secret = process.env.JWT_SECRET;
-
-      if (!secret) {
-        throw new Error(
-          "JWT_SECRET is not configured"
-        );
-      }
-
-      return jwt.verify(token, secret);
-    } catch {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET as string);
+      return decoded;
+    } catch (error) {
       throw new Error("Invalid token");
     }
   }
 
-  /**
-   * ============================================================
-   * LOGOUT
-   * ============================================================
-   */
-
-  static async logout(userId: string) {
+   static async logout(userId: string) {
     if (!userId) {
       throw new Error("User ID is required");
     }
 
     await prisma.user.update({
-      where: {
-        id: userId,
-      },
-
-      data: {
-        refreshTokenHash: null,
-      },
+      where: { id: userId },
+      data: { refreshTokenHash: null }
     });
 
     return true;
   }
 
-  /**
-   * ============================================================
-   * VERIFY EMAIL
-   * ============================================================
-   */
 
-  static async verifyEmail(token: string) {
+   static async verifyEmail(token: string) {
     if (!token) {
-      throw new Error(
-        "Verification token is required"
-      );
+      throw new Error("Verification token is required");
     }
 
     const user = await prisma.user.findFirst({
       where: {
         verifyToken: token,
-
         verifyTokenExpires: {
-          gt: new Date(),
-        },
-      },
-    });
+          gt: new Date()
+        }
+      }
+  });
 
-    if (!user) {
-      throw new Error("Invalid or expired token");
-    }
+    if (!user) throw new Error("Invalid token");
 
     await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-
+      where: { id: user.id },
       data: {
         emailVerified: true,
         emailVerifiedAt: new Date(),
-
         verifyToken: null,
-        verifyTokenExpires: null,
-      },
+        verifyTokenExpires: null
+      }
     });
 
-    return true;
+   return true;
   }
-
-  /**
-   * ============================================================
-   * FORGOT PASSWORD
-   * ============================================================
-   */
 
   static async forgotPassword(email: string) {
     if (!email) {
       throw new Error("Email is required");
     }
 
-    const normalizedEmail =
-      email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email } });
 
-    const user = await prisma.user.findUnique({
-      where: {
-        email: normalizedEmail,
-      },
-    });
+    if (!user) return true;
 
-    /**
-     * IMPORTANT:
-     *
-     * Return the same generic result whether the account
-     * exists or not.
-     *
-     * This prevents account/email enumeration.
-     */
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1);
 
-    if (!user) {
-      return true;
-    }
-
-    const token = crypto
-      .randomBytes(32)
-      .toString("hex");
-
-    const expiresAt = new Date(
-      Date.now() + 60 * 60 * 1000
-    );
-
-    await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-
+     await prisma.user.update({
+      where: { id: user.id },
       data: {
         passwordResetToken: token,
-        passwordResetExpires: expiresAt,
-      },
+        passwordResetExpires: expiresAt
+      }
     });
 
-    /**
-     * IMPORTANT:
-     *
-     * The controller/email service should send the reset
-     * email containing the token.
-     *
-     * Do not expose this token in a production API response.
-     */
-
-    if (
-      process.env.NODE_ENV !== "production"
-    ) {
-      return {
-        success: true,
-        token,
-      };
-    }
-
-    return {
-      success: true,
-    };
+   return { success: true, token };
   }
 
-  /**
-   * ============================================================
-   * RESET PASSWORD
-   * ============================================================
-   */
-
-  static async resetPassword(
-    token: string,
-    password: string
-  ) {
+ static async resetPassword(token: string, password: string) {
     if (!token) {
-      throw new Error(
-        "Reset token is required"
-      );
+      throw new Error("Reset token is required");
     }
-
     if (!password) {
-      throw new Error(
-        "New password is required"
-      );
+      throw new Error("New password is required");
     }
 
     const user = await prisma.user.findFirst({
       where: {
         passwordResetToken: token,
-
         passwordResetExpires: {
-          gt: new Date(),
-        },
-      },
+          gt: new Date()
+        }
+      }
     });
 
-    if (!user) {
-      throw new Error(
-        "Invalid or expired reset token"
-      );
-    }
+    if (!user) throw new Error("Expired token");
 
-    const passwordHash = await bcrypt.hash(
-      password,
-      12
-    );
+    const hash = await bcrypt.hash(password, 12);
 
-    await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-
+      await prisma.user.update({
+      where: { id: user.id },
       data: {
-        password: passwordHash,
-
+        password: hash,
         passwordResetToken: null,
-        passwordResetExpires: null,
-
-        /**
-         * Invalidate existing refresh sessions after
-         * a successful password reset.
-         */
-        refreshTokenHash: null,
-      },
+        passwordResetExpires: null
+      }
     });
 
+ 
     return true;
   }
 }
+
+ 
