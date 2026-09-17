@@ -6,9 +6,14 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "npx prisma migrate deploy && node dist/server.js",
-    "postinstall": "npm run build",
-    "prisma:seed": "npx prisma db seed",
-    "seed:admin": "npx ts-node prisma/seed.ts"
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:seed": "prisma db seed",
+    "seed:admin": "ts-node prisma/seed.ts",
+
+    "deploy": "npm run prisma:migrate && npm run prisma:seed && npm run build && npm start",
+
+    "postinstall": "prisma generate && npm run build"
   },
    "prisma": {
     "seed": "ts-node prisma/seed.ts"
